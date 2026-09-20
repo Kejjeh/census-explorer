@@ -16,6 +16,7 @@ retrieval timestamp and document checksum.  Refresh it with::
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -104,6 +105,9 @@ def classify(raw: Any) -> Cell:
     if raw is None:
         return Cell(raw=None, status=MISSING, meaning="value absent from source")
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        if isinstance(raw, float) and not math.isfinite(raw):
+            return Cell(raw=repr(raw), status=UNPARSEABLE,
+                        meaning="value is not a finite number")
         raw = repr(raw) if isinstance(raw, float) else str(raw)
     if not isinstance(raw, str):
         return Cell(raw=str(raw), status=UNPARSEABLE, meaning="unexpected value type")
@@ -127,6 +131,13 @@ def classify(raw: Any) -> Cell:
         number = float(text)
     except ValueError:
         return Cell(raw=raw, status=UNPARSEABLE, meaning="value is not numeric")
+
+    # ``float()`` accepts "NaN", "inf" and "-Infinity". None of them is a
+    # measurement, and letting one through would poison a sum, a class break or
+    # an exported cell silently.
+    if not math.isfinite(number):
+        return Cell(raw=raw, status=UNPARSEABLE,
+                    meaning="value is not a finite number")
 
     if number.is_integer():
         number = int(number)
