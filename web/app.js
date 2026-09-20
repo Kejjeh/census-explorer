@@ -1,39 +1,42 @@
-/* Census Explorer — guided place brief.
+/* Census Explorer — the explorer interface.
  *
  * No framework, no bundler, no CDN. The page talks only to the local service,
- * which holds no credentials and performs no network retrieval.
- *
- * The flow is deliberate: a question first, then the place, then what to show.
- * Every option comes from the service, which offers only measures the built
- * dataset actually carries at that geography. The page never invents one.
+ * which holds no credentials and performs no network retrieval. Every option
+ * it offers comes from the built dataset: the page never invents a measure, a
+ * place, a denominator or a margin of error.
  */
 'use strict';
 
 const state = {
   status: null,
   releaseId: null,
-  catalog: null,        // /api/questions
-  questionId: null,
-  question: null,
-  options: [],          // measure options for this question
-  measureId: null,
-  level: 'county',
-  areas: [],            // chosen GEOIDs ([] means "all at this level")
-  benchmarkId: 'none',
-  benchmarks: [],
   dataset: null,
+  catalog: null,          // /api/catalog, both levels
+  level: 'county',
+  measureId: null,
+  areas: [],              // [] means every area at this level
   values: null,
   geo: null,
-  cuts: [],
   quality: null,
+  questionId: null,       // resolved by the service from the selection
+  selectionJson: null,
+  benchmarkId: 'none',
+  benchmarks: [],
   benchmark: null,
+  cuts: [],
   sort: { key: 'estimate', dir: 'desc' },
-  selected: null,
+  pick: null,             // the inspected area
+  compare: [],            // up to two geoids, deliberately chosen
+  hover: null,
   measureFilter: '',
+  unitFilter: 'all',
+  placeQuery: '',
+  view: { k: 1, x: 0, y: 0 },
   loading: false,
 };
 
-const SEQUENTIAL = ['#e8eef4', '#bcd0e2', '#89aecb', '#5386ad', '#27618e'];
+const RAMP = ['#eaf1f7', '#c3d9ea', '#8fb8d6', '#5691bd', '#1f6199'];
+const MAX_TABLE_ROWS = 400;
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------- transport */
@@ -65,6 +68,8 @@ async function post(path, payload) {
   return body;
 }
 
+/* ------------------------------------------------------------- utilities */
+
 function toast(message, ms = 5200) {
   const el = $('toast');
   el.textContent = message;
@@ -84,8 +89,82 @@ function fmt(value, unit) {
   return Math.round(value).toLocaleString('en-US');
 }
 
-function currentOption() {
-  return state.options.find((o) => o.measure_id === state.measureId) || null;
+function fmtMoe(value, unit) {
+  // A margin of error on a percentage is a span of percentage points; writing
+  // it as a percentage invites reading it as a share of the estimate.
+  if (value === null || value === undefined) return '—';
+  return unit === 'percent' ? `± ${value.toFixed(1)} points` : `± ${fmt(value, unit)}`;
+}
+
+function isControlled(v) {
+  // The explicit flag recorded when the value was computed. Never inferred
+  // from source-flag text: flags are pooled across numerator and denominator,
+  // so one cell's flag says nothing about the result's uncertainty.
+  return v && v.ctl === true;
+}
+
+function plainReason(v, which) {
+  // The stored reason names the table cell; that belongs in source details.
+  const raw = (which === 'm' ? v.mr : v.er) || '';
+  if (!raw) return 'unavailable';
+  const body = /^[A-Z0-9]+_\d{3}: /.test(raw) ? raw.split(': ').slice(1).join(': ') : raw;
+  const lowered = body.charAt(0).toLowerCase() + body.slice(1);
+  if (lowered.includes('insufficient number of sample cases')) {
+    return 'too few sample cases here for the Census Bureau to publish a value';
+  }
+  if (lowered.includes('insufficient number of sample observations')) {
+    return 'too few sample observations here to compute a value';
+  }
+  if (lowered.includes('undefined, not zero')) {
+    return 'the denominator is zero here, so a share is undefined, not zero';
+  }
+  if (lowered.includes('controlled')) {
+    return 'controlled to an independent population estimate, so it carries no sampling error';
+  }
+  return lowered;
+}
+
+function reliabilityWords(v, unit) {
+  if (!v || v.es !== 'ok') return v ? plainReason(v, 'e') : 'no value built for this area';
+  if (isControlled(v)) {
+    return 'controlled to an independent population estimate, so it carries no sampling error';
+  }
+  if (v.ms !== 'ok') return `margin of error unavailable: ${plainReason(v, 'm')}`;
+  if (v.rel) return v.cv !== undefined && v.cv !== null
+    ? `${v.rel} (CV ${v.cv.toFixed(0)}%)` : v.rel;
+  if (unit === 'percent' && v.m !== null && v.m !== undefined && v.e) {
+    const ratio = Math.abs(v.m) / Math.abs(v.e) * 100;
+    const band = ratio < 10 ? 'narrow' : (ratio < 30 ? 'moderate' : 'wide — read as indicative');
+    return `${band}: the margin of error is ${ratio.toFixed(0)}% of the estimate`;
+  }
+  return 'estimate published';
+}
+
+function levelInfo(level) { return state.catalog.levels[level || state.level]; }
+
+function measures() {
+  const groups = levelInfo().groups;
+  return groups.flatMap((g) => g.measures);
+}
+
+function currentMeasure() {
+  return measures().find((m) => m.measure_id === state.measureId) || null;
+}
+
+function areaName(geoid) {
+  const a = state.dataset.areas.find((x) => x.geoid === geoid);
+  return a ? a.name : geoid;
+}
+
+function levelNoun(n) {
+  const word = state.level === 'county' ? 'borough' : 'census tract';
+  return n === 1 ? word : `${word}s`;
+}
+
+function scopedGeoids() {
+  if (state.selectionJson) return state.selectionJson.areas;
+  if (state.areas.length) return state.areas;
+  return state.dataset.areas.filter((a) => a.level === state.level).map((a) => a.geoid);
 }
 
 function areaParam() {
@@ -103,7 +182,7 @@ function selectionQuery() {
 async function boot() {
   state.status = await api('/api/status');
   if (!state.status.releases.length) {
-    $('startup').innerHTML = '<p class="blocked-note"><strong>No dataset is built yet.</strong>' +
+    $('startup').innerHTML = '<p class="blocked"><strong>No dataset is built yet.</strong>' +
       'Run <code>python -m census_explorer.cli fetch all</code> then ' +
       '<code>build</code>, or <code>fixtures build</code> to try the app with ' +
       'synthetic data.</p>';
@@ -118,200 +197,290 @@ async function boot() {
   state.releaseId = state.status.releases.some((r) => r.release_id === state.status.default_release)
     ? state.status.default_release : state.status.releases[0].release_id;
 
-  state.catalog = await api(`/api/questions?release=${encodeURIComponent(state.releaseId)}`);
-  $('period-chip').textContent = `Reference period: ${state.catalog.period_label}`;
-  state.dataset = await api(`/api/dataset?release=${encodeURIComponent(state.releaseId)}`);
+  const rel = encodeURIComponent(state.releaseId);
+  [state.dataset, state.catalog] = await Promise.all([
+    api(`/api/dataset?release=${rel}`),
+    api(`/api/catalog?release=${rel}`),
+  ]);
 
-  renderQuestions();
+  $('release-value').textContent =
+    `${state.catalog.period_label} · ${state.catalog.product_label}`;
+  if (!state.catalog.levels[state.level]) {
+    state.level = state.catalog.level_order[0];
+  }
+  state.measureId = measures()[0]?.measure_id || null;
+
   wireControls();
+  renderLevelSwitch();
+  renderSidebar();
   $('startup').hidden = true;
-  $('workspace').hidden = false;
-
-  const first = state.catalog.questions.find((q) => q.supported);
-  if (first) await chooseQuestion(first.question_id);
+  $('shell').hidden = false;
+  await loadBenchmarks();
+  await refresh();
   renderProjects();
   renderFooter();
 }
 
 function wireControls() {
+  document.querySelectorAll('.level-switch button').forEach((b) => {
+    b.addEventListener('click', () => setLevel(b.dataset.level));
+  });
   $('measure-search').addEventListener('input', (e) => {
     state.measureFilter = e.target.value.trim().toLowerCase();
-    renderMeasureOptions();
+    renderSidebar();
   });
-  $('measure-select').addEventListener('change', async (e) => {
-    state.measureId = e.target.value;
-    await refresh();
+  document.querySelectorAll('.chip').forEach((c) => {
+    c.addEventListener('click', () => {
+      state.unitFilter = c.dataset.unit;
+      document.querySelectorAll('.chip').forEach((x) => {
+        x.setAttribute('aria-pressed', String(x.dataset.unit === state.unitFilter));
+      });
+      renderSidebar();
+    });
   });
   $('benchmark-select').addEventListener('change', async (e) => {
     state.benchmarkId = e.target.value;
     await refresh();
   });
-  $('btn-quality').addEventListener('click', () => toggleDrawer());
+  $('btn-method').addEventListener('click', () => toggleDrawer());
   $('drawer-close').addEventListener('click', () => toggleDrawer(false));
-  $('btn-brief').addEventListener('click', openBrief);
   $('btn-export').addEventListener('click', doExport);
+  $('btn-save').addEventListener('click', toggleSavePanel);
   $('save-form').addEventListener('submit', saveProject);
+  $('zoom-in').addEventListener('click', () => zoomBy(1.4));
+  $('zoom-out').addEventListener('click', () => zoomBy(1 / 1.4));
+  $('zoom-fit').addEventListener('click', fitMap);
+  wirePlaceSearch();
+  wireMapGestures();
+  wireMeasureListKeys();
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('drawer').hidden) toggleDrawer(false);
+    if (e.key !== 'Escape') return;
+    if (!$('drawer').hidden) { toggleDrawer(false); return; }
+    if (!$('save-panel').hidden) { toggleSavePanel(false); return; }
+    if (!$('place-results').hidden) { closePlaceResults(); }
   });
 }
 
-/* --------------------------------------------------------- step 1: question */
+/* ------------------------------------------------------------ level + sidebar */
 
-function renderQuestions() {
-  const host = $('question-list');
-  host.textContent = '';
-  state.catalog.questions.forEach((q) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'question';
-    b.setAttribute('role', 'radio');
-    b.setAttribute('aria-checked', String(q.question_id === state.questionId));
-    b.disabled = !q.supported;
-    b.innerHTML = `<span class="q-title">${esc(q.title)}</span>` +
-      `<span class="q-sub">${esc(q.supported ? q.subtitle : q.unsupported_reason)}</span>`;
-    b.addEventListener('click', () => chooseQuestion(q.question_id));
-    host.appendChild(b);
+function renderLevelSwitch() {
+  document.querySelectorAll('.level-switch button').forEach((b) => {
+    const on = b.dataset.level === state.level;
+    b.setAttribute('aria-checked', String(on));
+    const info = state.catalog.levels[b.dataset.level];
+    b.disabled = !info;
   });
+  const info = levelInfo();
+  $('level-note').textContent =
+    `${info.area_count.toLocaleString('en-US')} ${info.label.toLowerCase()} — ${info.note}.`;
 }
 
-async function chooseQuestion(questionId) {
-  const q = state.catalog.questions.find((x) => x.question_id === questionId);
-  if (!q || !q.supported) return;
-  state.questionId = questionId;
-  state.question = q;
-  state.options = q.measures;
-  state.level = q.level;
-  state.measureId = q.measures[0]?.measure_id || null;
-  state.measureFilter = '';
-  state.selected = null;
-
-  // Default places per question, so the user sees an answer immediately.
-  const counties = state.catalog.places.county;
-  if (q.place_mode === 'single') state.areas = [counties[0].geoid];
-  else state.areas = [];
-
-  $('measure-search').value = '';
-  $('place-prompt').textContent = q.place_prompt;
-  $('measure-prompt').textContent = q.measure_prompt;
-  $('benchmark-prompt').textContent = q.benchmark_prompt || 'Compare against';
-  renderQuestions();
-  renderPlaceControls();
-  renderMeasureOptions();
+async function setLevel(level) {
+  if (level === state.level || !state.catalog.levels[level]) return;
+  state.level = level;
+  // A place chosen at one level does not exist at another, and neither does a
+  // comparison built from it.
+  state.areas = [];
+  state.pick = null;
+  state.compare = [];
+  state.placeQuery = '';
+  $('place-search').value = '';
+  closePlaceResults();
+  if (!measures().some((m) => m.measure_id === state.measureId)) {
+    state.measureId = measures()[0]?.measure_id || null;
+  }
+  renderLevelSwitch();
+  renderSidebar();
   await loadBenchmarks();
   await refresh();
 }
 
-/* ------------------------------------------------------------ step 2: place */
-
-function renderPlaceControls() {
-  const host = $('place-controls');
-  host.textContent = '';
-  const q = state.question;
-  const counties = state.catalog.places.county;
-
-  if (q.place_mode === 'all') {
-    const p = document.createElement('p');
-    p.className = 'place-all';
-    p.textContent = `All ${state.catalog.places.tract_count.toLocaleString('en-US')} ` +
-      'census tracts in the five boroughs. Census tracts are statistical areas ' +
-      'published by the Census Bureau, not neighbourhoods; this build has no ' +
-      'documented neighbourhood boundaries.';
-    host.appendChild(p);
-    return;
-  }
-
-  if (q.place_mode === 'single') {
-    const label = document.createElement('label');
-    label.className = 'field';
-    label.innerHTML = '<span class="visually-hidden">Place</span>';
-    const sel = document.createElement('select');
-    counties.forEach((c) => sel.add(new Option(c.name, c.geoid)));
-    sel.value = state.areas[0] || counties[0].geoid;
-    sel.addEventListener('change', async () => {
-      state.areas = [sel.value];
-      await loadBenchmarks();
-      await refresh();
-    });
-    label.appendChild(sel);
-    host.appendChild(label);
-    return;
-  }
-
-  const box = document.createElement('div');
-  box.className = 'place-checks';
-  box.setAttribute('role', 'group');
-  box.setAttribute('aria-label', 'Places to compare');
-  counties.forEach((c) => {
-    const id = `place-${c.geoid}`;
-    const label = document.createElement('label');
-    label.setAttribute('for', id);
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.id = id;
-    cb.value = c.geoid;
-    cb.checked = state.areas.length === 0 || state.areas.includes(c.geoid);
-    cb.addEventListener('change', async () => {
-      const checked = Array.from(box.querySelectorAll('input:checked')).map((x) => x.value);
-      if (!checked.length) { cb.checked = true; toast('Keep at least one place selected.'); return; }
-      state.areas = checked.length === counties.length ? [] : checked;
-      await loadBenchmarks();
-      await refresh();
-    });
-    label.append(cb, document.createTextNode(' ' + c.name));
-    box.appendChild(label);
-  });
-  host.appendChild(box);
-}
-
-/* ---------------------------------------------------------- step 3: measure */
-
-function renderMeasureOptions() {
-  const host = $('measure-select');
-  host.textContent = '';
+function sidebarGroups() {
   const needle = state.measureFilter;
-  const matches = state.options.filter((o) => !needle ||
-    `${o.label} ${o.counts_what} ${o.out_of}`.toLowerCase().includes(needle));
-  if (!matches.length) {
-    host.innerHTML = '<p class="muted small" style="padding:8px">' +
-      'No measure matches that filter. Clear it to see all ' +
-      `${state.options.length} options for this question.</p>`;
+  const unitOk = (m) => state.unitFilter === 'all' || m.unit === state.unitFilter;
+  const groups = levelInfo().groups.map((g) => ({
+    heading: g.heading,
+    all: g.measures.filter(unitOk),
+  }));
+  if (!needle) {
+    return groups.map((g) => ({ heading: g.heading, measures: g.all }))
+      .filter((g) => g.measures.length);
+  }
+  // A name match beats a description match. Typing "naturalis" should land on
+  // the naturalised measure, not on every measure whose definition happens to
+  // mention naturalisation; the wider match still runs when nothing is named.
+  const byLabel = groups
+    .map((g) => ({
+      heading: g.heading,
+      measures: g.all.filter((m) => m.label.toLowerCase().includes(needle)),
+    }))
+    .filter((g) => g.measures.length);
+  if (byLabel.length) return byLabel;
+  return groups
+    .map((g) => ({
+      heading: g.heading,
+      measures: g.all.filter((m) =>
+        `${m.counts_what} ${m.out_of} ${g.heading} ${m.tables.join(' ')}`
+          .toLowerCase().includes(needle)),
+    }))
+    .filter((g) => g.measures.length);
+}
+
+function renderSidebar() {
+  const host = $('topic-groups');
+  host.textContent = '';
+  const groups = sidebarGroups();
+  const shown = groups.reduce((n, g) => n + g.measures.length, 0);
+  $('measure-count').textContent = shown
+    ? `${shown} of ${levelInfo().measure_count} measures`
+    : '';
+
+  if (!groups.length) {
+    host.innerHTML = '<p class="empty-state">No measure matches that search. ' +
+      'Clear the box or choose <em>All</em> to see every measure this build carries.</p>';
     return;
   }
-  if (!matches.some((o) => o.measure_id === state.measureId)) {
-    state.measureId = matches[0].measure_id;
-  }
-  matches.forEach((o) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'measure-option';
-    b.setAttribute('role', 'option');
-    b.setAttribute('aria-selected', String(o.measure_id === state.measureId));
-    // Labels wrap: a native select clips them, and a clipped measure name is
-    // exactly the thing a reader must not have to guess at.
-    b.innerHTML = `<span class="m-label">${esc(o.label)}</span>` +
-      `<span class="m-sub">${esc(o.unit === 'percent'
-        ? 'share, out of ' + o.out_of : 'number of people')}</span>`;
-    b.addEventListener('click', async () => {
-      state.measureId = o.measure_id;
-      renderMeasureOptions();
-      await refresh();
+  groups.forEach((g) => {
+    const box = document.createElement('div');
+    box.className = 'topic-group';
+    const h = document.createElement('p');
+    h.className = 'group-heading';
+    h.textContent = g.heading;
+    box.appendChild(h);
+    g.measures.forEach((m) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'measure';
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', String(m.measure_id === state.measureId));
+      // One tab stop for the whole list. Forty-seven stops between the search
+      // box and the map is not keyboard access, it is a keyboard obstacle.
+      b.tabIndex = m.measure_id === state.measureId ? 0 : -1;
+      // Labels wrap: a clipped measure name is exactly the thing a reader must
+      // not have to guess at.
+      b.innerHTML = `<span class="m-label">${esc(m.label)}</span>` +
+        `<span class="m-sub">${esc(m.unit === 'percent'
+          ? `share, out of ${m.out_of}` : 'number of people')}</span>`;
+      b.addEventListener('click', () => chooseMeasure(m.measure_id));
+      box.appendChild(b);
     });
-    host.appendChild(b);
+    host.appendChild(box);
   });
-  // Scroll the container rather than calling scrollIntoView: that also moves
-  // the browser's sequential-focus starting point, which sent the first Tab
-  // into this list instead of the skip link.
-  const active = host.querySelector('[aria-selected="true"]');
-  if (active && needle === '') {
-    const top = active.offsetTop;
-    const bottom = top + active.offsetHeight;
-    if (top < host.scrollTop) host.scrollTop = top;
-    else if (bottom > host.scrollTop + host.clientHeight) {
-      host.scrollTop = bottom - host.clientHeight;
-    }
+  if (!host.querySelector('[tabindex="0"]')) {
+    const first = host.querySelector('.measure');
+    if (first) first.tabIndex = 0;
   }
 }
+
+function wireMeasureListKeys() {
+  const host = $('topic-groups');
+  host.addEventListener('keydown', (e) => {
+    if (!e.target.classList.contains('measure')) return;
+    const items = [...host.querySelectorAll('.measure')];
+    const i = items.indexOf(e.target);
+    const go = (j) => {
+      const next = items[Math.max(0, Math.min(items.length - 1, j))];
+      if (!next) return;
+      items.forEach((x) => { x.tabIndex = -1; });
+      next.tabIndex = 0;
+      next.focus();
+    };
+    if (e.key === 'ArrowDown') { e.preventDefault(); go(i + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); go(i - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); go(0); }
+    else if (e.key === 'End') { e.preventDefault(); go(items.length - 1); }
+  });
+}
+
+async function chooseMeasure(measureId) {
+  if (measureId === state.measureId) return;
+  state.measureId = measureId;
+  renderSidebar();
+  await refresh();
+}
+
+/* ----------------------------------------------------------- place search */
+
+function placeMatches(query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return state.dataset.areas
+    .filter((a) => a.level === state.level)
+    .filter((a) => a.name.toLowerCase().includes(q) || a.geoid.includes(q))
+    .slice(0, 12);
+}
+
+function wirePlaceSearch() {
+  const input = $('place-search');
+  input.addEventListener('input', () => {
+    state.placeQuery = input.value;
+    renderPlaceResults();
+    renderTable();
+  });
+  input.addEventListener('focus', renderPlaceResults);
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.place-find')) closePlaceResults();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      const first = $('place-results').querySelector('button');
+      if (first) { e.preventDefault(); first.focus(); }
+    }
+  });
+  // An open list sits over the map, so it must also close when focus leaves
+  // it — otherwise it keeps swallowing clicks meant for what is underneath.
+  $('place-search').closest('.place-find').addEventListener('focusout', (e) => {
+    if (!e.relatedTarget || !e.relatedTarget.closest('.place-find')) {
+      setTimeout(closePlaceResults, 120);
+    }
+  });
+}
+
+function closePlaceResults() {
+  $('place-results').hidden = true;
+  $('place-search').setAttribute('aria-expanded', 'false');
+}
+
+function renderPlaceResults() {
+  const host = $('place-results');
+  const input = $('place-search');
+  const q = state.placeQuery.trim();
+  host.textContent = '';
+  if (!q) { closePlaceResults(); return; }
+
+  const hits = placeMatches(q);
+  if (!hits.length) {
+    // A search that finds nothing must say what this build can and cannot
+    // find, rather than leaving a blank box.
+    const li = document.createElement('li');
+    li.className = 'no-match';
+    li.innerHTML = `No ${levelNoun(2)} match “${esc(q)}”. This build carries the ` +
+      'five New York City boroughs and their census tracts by published name ' +
+      'and GEOID. It has no address search and no neighbourhood boundaries.';
+    host.appendChild(li);
+  } else {
+    hits.forEach((a) => {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'option');
+      b.innerHTML = `${esc(a.name)} <span class="r-id">${esc(a.geoid)}</span>`;
+      b.addEventListener('click', () => {
+        selectArea(a.geoid, { focus: true });
+        input.value = '';
+        state.placeQuery = '';
+        closePlaceResults();
+        renderTable();
+      });
+      li.appendChild(b);
+      host.appendChild(li);
+    });
+  }
+  host.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
+
+/* ---------------------------------------------------------- data + render */
 
 async function loadBenchmarks() {
   const res = await api(`/api/benchmarks?release=${encodeURIComponent(state.releaseId)}` +
@@ -324,16 +493,15 @@ async function loadBenchmarks() {
     state.benchmarkId = 'none';
   }
   sel.value = state.benchmarkId;
-  const chosen = state.benchmarks.find((b) => b.benchmark_id === state.benchmarkId);
-  $('benchmark-note').textContent = chosen ? chosen.description : '';
 }
-
-/* -------------------------------------------------------------- data + view */
 
 function setLoading(on) {
   state.loading = on;
-  ['btn-brief', 'btn-export', 'btn-quality'].forEach((id) => { $(id).disabled = on; });
-  if (on) $('map').innerHTML = '<p class="spinner">Loading…</p>';
+  ['btn-export', 'btn-method', 'btn-save'].forEach((id) => { $(id).disabled = on; });
+  if (on) {
+    $('map-empty').hidden = false;
+    $('map-empty').textContent = 'Loading…';
+  }
 }
 
 async function refresh() {
@@ -341,16 +509,17 @@ async function refresh() {
   setLoading(true);
   $('blocked').hidden = true;
   try {
+    const rel = encodeURIComponent(state.releaseId);
     const [values, geo, quality] = await Promise.all([
-      api(`/api/values?release=${encodeURIComponent(state.releaseId)}` +
-          `&measure=${encodeURIComponent(state.measureId)}`),
-      api(`/api/geography?release=${encodeURIComponent(state.releaseId)}&level=${state.level}`),
+      api(`/api/values?release=${rel}&measure=${encodeURIComponent(state.measureId)}`),
+      api(`/api/geography?release=${rel}&level=${state.level}`),
       api(`/api/quality?${selectionQuery()}`),
     ]);
     state.values = values.values;
     state.geo = geo;
     state.quality = quality.quality;
     state.selectionJson = quality.selection;
+    state.questionId = quality.question_id;
     state.benchmark = null;
     if (state.benchmarkId && state.benchmarkId !== 'none') {
       state.benchmark = await api(`/api/benchmark?${selectionQuery()}` +
@@ -360,18 +529,24 @@ async function refresh() {
     render();
   } catch (e) {
     showBlocked('This selection could not be shown', [e.message]);
-    $('map').innerHTML = '<p class="empty">Nothing to draw for this selection.</p>';
+    state.values = null;
+    $('map').textContent = '';
+    $('map-empty').hidden = false;
+    $('map-empty').textContent = 'Nothing to draw for this selection.';
   } finally {
     setLoading(false);
   }
 }
 
-function selectedGeoids() {
-  return state.selectionJson ? state.selectionJson.areas : state.areas;
+function showBlocked(title, lines) {
+  const el = $('blocked');
+  el.hidden = false;
+  el.innerHTML = `<strong>${esc(title)}</strong><ul>` +
+    lines.map((l) => `<li>${esc(l)}</li>`).join('') + '</ul>';
 }
 
 function usableValues() {
-  return selectedGeoids()
+  return scopedGeoids()
     .map((g) => state.values?.[g])
     .filter((v) => v && v.es === 'ok')
     .map((v) => v.e);
@@ -398,59 +573,68 @@ function classOf(value) {
   return state.cuts.length;
 }
 
-function showBlocked(title, lines) {
-  const el = $('blocked');
-  el.hidden = false;
-  el.innerHTML = `<strong>${esc(title)}</strong><ul>` +
-    lines.map((l) => `<li>${esc(l)}</li>`).join('') + '</ul>';
-}
-
 function render() {
-  const o = currentOption();
-  if (!o) return;
-  renderSummary(o);
-  $('measure-title').textContent = o.label;
+  const m = currentMeasure();
+  if (!m) return;
+  $('measure-title').textContent = m.label;
+  $('denominator-line').textContent = m.unit === 'percent'
+    ? `Percent of ${m.out_of} · ${state.catalog.period_label}`
+    : `Number of people · ${state.catalog.period_label}`;
   $('map-caption').textContent =
-    `${o.label} — ${state.catalog.period_label}, ` +
-    `${state.level === 'county' ? 'boroughs' : 'census tracts'}. ` +
-    (o.unit === 'percent' ? 'Shaded by percentage.' : 'Shaded by number of people.');
+    `${m.label}, ${levelNoun(2)}, ${state.catalog.period_label}. ` +
+    'Shading uses five quantile classes over the areas in view. ' +
+    'The table below lists the same values.' + unmatchedNote();
+  renderScopeBar();
   drawMap();
-  renderLegend(o);
-  renderTable(o);
-  renderSourceDetails(o);
+  renderLegend(m);
+  renderTable();
+  renderPlaceCard();
+  renderComparePanel();
+  renderBenchmarkCard();
+  renderSourceDetails();
   if (!$('drawer').hidden) renderDrawer();
 }
 
-function renderSummary(o) {
-  const q = state.question;
-  const places = describePlaces();
-  const rows = [
-    ['Question', q.title],
-    ['Places', places],
-    ['Reference period', `${state.catalog.period_label} — a five-year period estimate, not a single year`],
-    ['What is counted', o.counts_what],
-    [o.unit === 'percent' ? 'Out of' : 'Units',
-      o.unit === 'percent' ? o.out_of : 'people (a number, not a share)'],
-  ];
-  if (state.benchmark && state.benchmark.available) {
-    rows.push(['Reference', `${state.benchmark.label} — ${state.benchmark.basis}`]);
-  } else if (state.benchmark && !state.benchmark.available) {
-    rows.push(['Reference', `unavailable — ${state.benchmark.unavailable_reason}`]);
-  }
-  $('selection-summary').innerHTML =
-    `<p class="headline">${esc(o.label)}</p><dl>` +
-    rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('') + '</dl>';
+function unmatchedNote() {
+  // An area with no boundary at this vintage is missing from the map but
+  // present in the table and in every export. Saying so on the figure is the
+  // only place a reader would notice the difference.
+  const report = (state.dataset.join_reports || [])
+    .find((r) => r.level === state.level);
+  if (!report || !report.unmatched_observation_count) return '';
+  const n = report.unmatched_observation_count;
+  return ` ${n} ${levelNoun(n)} have no published boundary at this geography ` +
+    `vintage (${state.dataset.release.boundary_release}) and cannot be drawn; ` +
+    'they are still in the table and in every export.';
 }
 
-function describePlaces() {
-  const counties = state.catalog.places.county;
-  const names = Object.fromEntries(counties.map((c) => [c.geoid, c.name]));
-  if (state.level === 'tract') {
-    return `${(state.selectionJson?.area_count ?? 0).toLocaleString('en-US')} census ` +
-      'tracts in New York City (statistical areas, not neighbourhoods)';
+function renderScopeBar() {
+  const host = $('scope-bar');
+  host.textContent = '';
+  const n = scopedGeoids().length;
+  const total = levelInfo().area_count;
+  const text = document.createElement('span');
+  text.className = 'scope-text';
+  text.textContent = state.areas.length
+    ? `Showing ${n} of ${total.toLocaleString('en-US')} ${levelNoun(total)}: ` +
+      `${state.areas.map(areaName).join(', ')}. Exports and the brief cover exactly these.`
+    : `Showing all ${n.toLocaleString('en-US')} ${levelNoun(n)}. ` +
+      'Exports and the brief cover exactly these.';
+  host.appendChild(text);
+  if (state.areas.length) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn ghost';
+    b.textContent = `Show all ${levelNoun(2)}`;
+    b.addEventListener('click', () => setAreas([]));
+    host.appendChild(b);
   }
-  const chosen = state.areas.length ? state.areas : counties.map((c) => c.geoid);
-  return chosen.map((g) => names[g] || g).join(', ');
+}
+
+async function setAreas(areas) {
+  state.areas = areas;
+  await loadBenchmarks();
+  await refresh();
 }
 
 /* ------------------------------------------------------------------- map */
@@ -466,16 +650,25 @@ function projectPath(geometry, project) {
   return out.join(' ');
 }
 
+const MAP_W = 900;
+const MAP_H = 620;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 function drawMap() {
   const host = $('map');
   host.textContent = '';
-  const visible = new Set(selectedGeoids());
+  const empty = $('map-empty');
+  const visible = new Set(scopedGeoids());
   const features = (state.geo?.features || []).filter((f) => visible.has(f.properties.GEOID));
   if (!features.length) {
-    host.innerHTML = '<p class="empty">No boundary layer is available for these ' +
-      'areas at this geography vintage. The table below still carries every value.</p>';
+    empty.hidden = false;
+    empty.textContent = 'No boundary layer is available for these areas at this ' +
+      'geography vintage. The table below still carries every value.';
+    map._bboxes = null;
     return;
   }
+  empty.hidden = true;
+
   let minx = Infinity; let miny = Infinity; let maxx = -Infinity; let maxy = -Infinity;
   const walk = (n) => {
     if (typeof n[0] === 'number') {
@@ -485,28 +678,40 @@ function drawMap() {
   };
   features.forEach((f) => f.geometry && walk(f.geometry.coordinates));
 
-  const W = 700; const H = 460; const pad = 10;
+  const pad = 12;
   const sx = Math.cos(((miny + maxy) / 2) * Math.PI / 180);
-  const scale = Math.min((W - 2 * pad) / ((maxx - minx) * sx), (H - 2 * pad) / (maxy - miny));
-  const ox = pad + ((W - 2 * pad) - (maxx - minx) * sx * scale) / 2;
-  const oy = pad + ((H - 2 * pad) - (maxy - miny) * scale) / 2;
+  const scale = Math.min((MAP_W - 2 * pad) / ((maxx - minx) * sx),
+                         (MAP_H - 2 * pad) / (maxy - miny));
+  const ox = pad + ((MAP_W - 2 * pad) - (maxx - minx) * sx * scale) / 2;
+  const oy = pad + ((MAP_H - 2 * pad) - (maxy - miny) * scale) / 2;
   const project = (x, y) => [ox + (x - minx) * sx * scale, oy + (maxy - y) * scale];
 
-  const o = currentOption();
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const m = currentMeasure();
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${MAP_W} ${MAP_H}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label',
-    `${o.label}, ${state.level === 'county' ? 'boroughs' : 'census tracts'}. ` +
-    'The table below lists the same values.');
+    `${m.label}, ${levelNoun(2)}. The table below lists the same values.`);
+
+  const g = document.createElementNS(SVG_NS, 'g');
+  g.id = 'map-layer';
+  svg.appendChild(g);
+
   if (state.geo.metadata && state.geo.metadata.synthetic) {
-    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    t.setAttribute('x', '10'); t.setAttribute('y', '20');
-    t.setAttribute('font-size', '13'); t.setAttribute('fill', '#7a3b12');
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', '12'); t.setAttribute('y', '22');
+    t.setAttribute('font-size', '14'); t.setAttribute('fill', '#8a4b12');
+    t.setAttribute('font-weight', '700');
     t.textContent = 'SYNTHETIC SHAPES — not boundaries';
     svg.appendChild(t);
   }
-  const interactive = features.length <= 400;
+
+  // Per-shape keyboard stops are useful for five boroughs and hostile for two
+  // thousand tracts; at that size the table and the place search are the
+  // keyboard route, and the caption says so.
+  const perShapeFocus = features.length <= 60;
+  const bboxes = {};
 
   features.forEach((f) => {
     if (!f.geometry) return;
@@ -514,45 +719,245 @@ function drawMap() {
     const v = state.values?.[geoid];
     const est = v && v.es === 'ok' ? v.e : null;
     const cls = classOf(est);
-    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const p = document.createElementNS(SVG_NS, 'path');
     p.setAttribute('d', projectPath(f.geometry, project));
     if (cls === null) {
-      p.setAttribute('fill', '#f4f1ec');
-      p.setAttribute('stroke', '#b9b2a6');
+      p.setAttribute('fill', 'var(--c-none)');
+      p.setAttribute('stroke', 'var(--c-none-line)');
       p.setAttribute('stroke-dasharray', '2 2');
     } else {
-      p.setAttribute('fill', SEQUENTIAL[Math.min(cls, SEQUENTIAL.length - 1)]);
+      p.setAttribute('fill', RAMP[Math.min(cls, RAMP.length - 1)]);
       p.setAttribute('stroke', '#ffffff');
     }
     p.setAttribute('stroke-width', '0.6');
+    p.setAttribute('vector-effect', 'non-scaling-stroke');
     p.dataset.geoid = geoid;
-    if (state.selected === geoid) p.dataset.selected = 'true';
-    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `${f.properties.name}: ` +
-      (est === null ? (v ? plainReason(v, 'e') : 'no usable estimate') : fmt(est, o.unit));
-    p.appendChild(title);
-    p.addEventListener('click', () => selectArea(geoid));
-    if (interactive) {
+    const label = `${f.properties.name}: ` +
+      (est === null ? (v ? plainReason(v, 'e') : 'no usable estimate') : fmt(est, m.unit));
+    if (perShapeFocus) {
       p.setAttribute('tabindex', '0');
       p.setAttribute('role', 'button');
-      p.setAttribute('aria-label', title.textContent);
-      p.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectArea(geoid); }
-      });
+      p.setAttribute('aria-label', label);
+    } else {
+      const title = document.createElementNS(SVG_NS, 'title');
+      title.textContent = label;
+      p.appendChild(title);
     }
-    svg.appendChild(p);
+    g.appendChild(p);
+    const bb = [Infinity, Infinity, -Infinity, -Infinity];
+    const walk2 = (n) => {
+      if (typeof n[0] === 'number') {
+        const [px, py] = project(n[0], n[1]);
+        bb[0] = Math.min(bb[0], px); bb[1] = Math.min(bb[1], py);
+        bb[2] = Math.max(bb[2], px); bb[3] = Math.max(bb[3], py);
+      } else n.forEach(walk2);
+    };
+    walk2(f.geometry.coordinates);
+    bboxes[geoid] = bb;
   });
+
   host.appendChild(svg);
+  map._svg = svg;
+  map._layer = g;
+  map._bboxes = bboxes;
+  applyView();
+  markMapSelection();
 }
 
-function renderLegend(o) {
-  const el = $('legend');
-  const parts = [`<span>${o.unit === 'percent' ? 'percent of the denominator' : 'people'}</span>`];
-  for (let i = 0; i <= state.cuts.length; i += 1) {
-    parts.push(`<span class="swatch" style="background:${SEQUENTIAL[Math.min(i, SEQUENTIAL.length - 1)]}"></span>`);
-    if (i < state.cuts.length) parts.push(`<span>${fmt(state.cuts[i], o.unit)}</span>`);
+const map = { _svg: null, _layer: null, _bboxes: null };
+
+function applyView() {
+  if (!map._layer) return;
+  const { k, x, y } = state.view;
+  map._layer.setAttribute('transform', `translate(${x} ${y}) scale(${k})`);
+}
+
+function clampView() {
+  const v = state.view;
+  v.k = Math.min(24, Math.max(1, v.k));
+  // Keep at least a quarter of the drawing on screen in each direction.
+  const maxPan = { x: MAP_W * v.k - MAP_W * 0.25, y: MAP_H * v.k - MAP_H * 0.25 };
+  v.x = Math.min(MAP_W * 0.25, Math.max(-maxPan.x, v.x));
+  v.y = Math.min(MAP_H * 0.25, Math.max(-maxPan.y, v.y));
+}
+
+function zoomAt(factor, cx, cy) {
+  const v = state.view;
+  const k0 = v.k;
+  v.k = Math.min(24, Math.max(1, k0 * factor));
+  const ratio = v.k / k0;
+  v.x = cx - (cx - v.x) * ratio;
+  v.y = cy - (cy - v.y) * ratio;
+  clampView();
+  applyView();
+}
+
+function zoomBy(factor) { zoomAt(factor, MAP_W / 2, MAP_H / 2); }
+
+function fitMap() {
+  state.view = { k: 1, x: 0, y: 0 };
+  applyView();
+}
+
+function focusOnArea(geoid) {
+  const bb = map._bboxes && map._bboxes[geoid];
+  if (!bb) return;
+  const w = Math.max(bb[2] - bb[0], 1);
+  const h = Math.max(bb[3] - bb[1], 1);
+  const k = Math.min(12, Math.max(1, Math.min(MAP_W / (w * 2.4), MAP_H / (h * 2.4))));
+  const cx = (bb[0] + bb[2]) / 2;
+  const cy = (bb[1] + bb[3]) / 2;
+  state.view = { k, x: MAP_W / 2 - cx * k, y: MAP_H / 2 - cy * k };
+  clampView();
+  applyView();
+}
+
+function svgPoint(evt) {
+  const svg = map._svg;
+  if (!svg) return { x: MAP_W / 2, y: MAP_H / 2 };
+  const r = svg.getBoundingClientRect();
+  // preserveAspectRatio="xMidYMid meet": one shared scale, centred.
+  const s = Math.min(r.width / MAP_W, r.height / MAP_H);
+  return {
+    x: (evt.clientX - r.left - (r.width - MAP_W * s) / 2) / s,
+    y: (evt.clientY - r.top - (r.height - MAP_H * s) / 2) / s,
+  };
+}
+
+function wireMapGestures() {
+  const host = $('map');
+  let drag = null;
+
+  host.addEventListener('wheel', (e) => {
+    if (!map._svg) return;
+    e.preventDefault();
+    const p = svgPoint(e);
+    zoomAt(e.deltaY < 0 ? 1.18 : 1 / 1.18, p.x, p.y);
+  }, { passive: false });
+
+  host.addEventListener('pointerdown', (e) => {
+    if (!map._svg || e.button !== 0) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0 };
+    host.setPointerCapture(e.pointerId);
+    host.classList.add('dragging');
+  });
+  host.addEventListener('pointermove', (e) => {
+    if (drag && drag.id === e.pointerId) {
+      const r = map._svg.getBoundingClientRect();
+      const s = Math.min(r.width / MAP_W, r.height / MAP_H) || 1;
+      const dx = (e.clientX - drag.x) / s;
+      const dy = (e.clientY - drag.y) / s;
+      drag.moved += Math.abs(dx) + Math.abs(dy);
+      drag.x = e.clientX; drag.y = e.clientY;
+      state.view.x += dx; state.view.y += dy;
+      clampView();
+      applyView();
+      return;
+    }
+    const geoid = e.target.dataset && e.target.dataset.geoid;
+    setHover(geoid || null);
+  });
+  const endDrag = (e) => {
+    if (!drag || drag.id !== e.pointerId) return;
+    const moved = drag.moved;
+    drag = null;
+    host.classList.remove('dragging');
+    if (moved < 4 && e.target.dataset && e.target.dataset.geoid) {
+      selectArea(e.target.dataset.geoid);
+    }
+  };
+  host.addEventListener('pointerup', endDrag);
+  host.addEventListener('pointercancel', () => {
+    drag = null; host.classList.remove('dragging');
+  });
+  host.addEventListener('pointerleave', () => setHover(null));
+
+  host.addEventListener('focusin', (e) => {
+    const geoid = e.target.dataset && e.target.dataset.geoid;
+    if (geoid) setHover(geoid);
+  });
+  host.addEventListener('focusout', (e) => {
+    if (e.target.dataset && e.target.dataset.geoid) setHover(null);
+  });
+
+  host.addEventListener('keydown', (e) => {
+    const geoid = e.target.dataset && e.target.dataset.geoid;
+    if (geoid && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault(); selectArea(geoid); return;
+    }
+    const step = 60 / state.view.k;
+    const moves = {
+      ArrowLeft: [step, 0], ArrowRight: [-step, 0],
+      ArrowUp: [0, step], ArrowDown: [0, -step],
+    };
+    if (moves[e.key]) {
+      e.preventDefault();
+      state.view.x += moves[e.key][0] * state.view.k;
+      state.view.y += moves[e.key][1] * state.view.k;
+      clampView(); applyView(); return;
+    }
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomBy(1.4); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.4); }
+    else if (e.key === '0') { e.preventDefault(); fitMap(); }
+  });
+}
+
+function setHover(geoid) {
+  if (state.hover === geoid) return;
+  state.hover = geoid;
+  if (map._layer) {
+    map._layer.querySelectorAll('path[data-hover]').forEach((p) => {
+      delete p.dataset.hover;
+    });
+    if (geoid) {
+      const p = map._layer.querySelector(`path[data-geoid="${CSS.escape(geoid)}"]`);
+      if (p) p.dataset.hover = 'true';
+    }
   }
-  const missing = selectedGeoids().filter((g) => !(state.values?.[g]?.es === 'ok')).length;
+  renderReadout();
+}
+
+function renderReadout() {
+  const host = $('readout');
+  const geoid = state.hover || state.pick;
+  const m = currentMeasure();
+  if (!geoid || !m) { host.textContent = ''; return; }
+  const v = state.values?.[geoid];
+  const value = v && v.es === 'ok' ? fmt(v.e, m.unit) : 'no data';
+  const moe = v && v.es === 'ok'
+    ? (isControlled(v) ? ' (controlled total, no sampling error)'
+      : (v.ms === 'ok' ? ` ${fmtMoe(v.m, m.unit)}` : ' (margin of error unavailable)'))
+    : '';
+  host.innerHTML = `<span class="r-name">${esc(areaName(geoid))}</span>` +
+    `<span class="r-val">${esc(value)}${esc(moe)}</span>`;
+}
+
+function markMapSelection() {
+  if (!map._layer) return;
+  map._layer.querySelectorAll('path[data-pick], path[data-cmp]').forEach((p) => {
+    delete p.dataset.pick; delete p.dataset.cmp;
+  });
+  state.compare.forEach((g, i) => {
+    const p = map._layer.querySelector(`path[data-geoid="${CSS.escape(g)}"]`);
+    if (p) p.dataset.cmp = i === 0 ? 'a' : 'b';
+  });
+  if (state.pick) {
+    const p = map._layer.querySelector(`path[data-geoid="${CSS.escape(state.pick)}"]`);
+    if (p) p.dataset.pick = 'true';
+  }
+}
+
+function renderLegend(m) {
+  const el = $('legend');
+  const parts = [`<span class="lg-title">${m.unit === 'percent'
+    ? `percent of ${esc(m.out_of)}` : 'people'}</span>`];
+  for (let i = 0; i <= state.cuts.length; i += 1) {
+    parts.push(`<span class="swatch" style="background:${RAMP[Math.min(i, RAMP.length - 1)]}"></span>`);
+    if (i < state.cuts.length) {
+      parts.push(`<span class="lg-num">${esc(fmt(state.cuts[i], m.unit))}</span>`);
+    }
+  }
+  const missing = scopedGeoids().filter((g) => !(state.values?.[g]?.es === 'ok')).length;
   parts.push('<span class="nodata"></span>');
   parts.push(`<span>no usable estimate (${missing})</span>`);
   el.innerHTML = parts.join(' ');
@@ -567,72 +972,23 @@ const COLUMNS = [
   { key: 'quality', label: 'Reliability', num: false },
 ];
 
-function plainReason(v, which) {
-  // The stored reason names the table cell; that belongs in source details.
-  const raw = (which === 'm' ? v.mr : v.er) || '';
-  if (!raw) return 'unavailable';
-  const body = /^[A-Z0-9]+_\d{3}: /.test(raw) ? raw.split(': ').slice(1).join(': ') : raw;
-  const lowered = body.charAt(0).toLowerCase() + body.slice(1);
-  if (lowered.includes('insufficient number of sample cases')) {
-    return 'too few sample cases here for the Census Bureau to publish a value';
-  }
-  if (lowered.includes('insufficient number of sample observations')) {
-    return 'too few sample observations here to compute a value';
-  }
-  if (lowered.includes('undefined, not zero')) {
-    return 'the denominator is zero here, so a share is undefined, not zero';
-  }
-  if (lowered.includes('controlled')) {
-    return 'controlled to an independent population estimate, so it carries no sampling error';
-  }
-  return lowered;
-}
-
-function isControlled(v) {
-  // The explicit flag recorded when the value was computed. Never inferred
-  // from source-flag text: flags are pooled across numerator and denominator,
-  // so one cell's flag says nothing about the result's uncertainty.
-  return v.ctl === true;
-}
-
-function fmtMoe(value, unit) {
-  // A margin of error on a percentage is a span of percentage points; writing
-  // it as a percentage invites reading it as a share of the estimate.
-  if (value === null || value === undefined) return '—';
-  return unit === 'percent' ? `± ${value.toFixed(1)} points` : `± ${fmt(value, unit)}`;
-}
-
-function reliabilityWords(v, unit) {
-  // Says something the margin-of-error column does not already say.
-  if (v.es !== 'ok') return plainReason(v, 'e');
-  if (isControlled(v)) {
-    return 'controlled to an independent population estimate, so it carries no sampling error';
-  }
-  if (v.ms !== 'ok') return `margin of error unavailable: ${plainReason(v, 'm')}`;
-  if (v.rel) return v.cv !== undefined && v.cv !== null
-    ? `${v.rel} (CV ${v.cv.toFixed(0)}%)` : v.rel;
-  if (unit === 'percent' && v.m !== null && v.m !== undefined && v.e) {
-    const ratio = Math.abs(v.m) / Math.abs(v.e) * 100;
-    const band = ratio < 10 ? 'narrow' : (ratio < 30 ? 'moderate' : 'wide — read as indicative');
-    return `${band}: the margin of error is ${ratio.toFixed(0)}% of the estimate`;
-  }
-  return 'estimate published';
-}
-
 function rowsForTable() {
-  const o = currentOption();
-  const rows = selectedGeoids().map((geoid) => {
+  const m = currentMeasure();
+  const q = state.placeQuery.trim().toLowerCase();
+  let rows = scopedGeoids().map((geoid) => {
     const v = state.values?.[geoid] || {};
-    const area = state.dataset.areas.find((a) => a.geoid === geoid);
     return {
       geoid,
-      name: area ? area.name : geoid,
+      name: areaName(geoid),
       estimate: v.es === 'ok' ? v.e : null,
       moe: v.ms === 'ok' ? v.m : null,
       controlled: isControlled(v),
-      quality: reliabilityWords(v, o.unit),
+      quality: reliabilityWords(v, m.unit),
     };
   });
+  if (q) {
+    rows = rows.filter((r) => r.name.toLowerCase().includes(q) || r.geoid.includes(q));
+  }
   const { key, dir } = state.sort;
   rows.sort((a, b) => {
     const av = a[key]; const bv = b[key];
@@ -646,7 +1002,9 @@ function rowsForTable() {
   return rows;
 }
 
-function renderTable(o) {
+function renderTable() {
+  const m = currentMeasure();
+  if (!m || !state.values) return;
   const head = $('table-head');
   head.textContent = '';
   const tr = document.createElement('tr');
@@ -660,8 +1018,11 @@ function renderTable(o) {
     b.type = 'button';
     b.textContent = c.label;
     b.addEventListener('click', () => {
-      state.sort = { key: c.key, dir: state.sort.key === c.key && state.sort.dir === 'desc' ? 'asc' : 'desc' };
-      renderTable(o);
+      state.sort = {
+        key: c.key,
+        dir: state.sort.key === c.key && state.sort.dir === 'desc' ? 'asc' : 'desc',
+      };
+      renderTable();
     });
     th.appendChild(b);
     tr.appendChild(th);
@@ -670,16 +1031,18 @@ function renderTable(o) {
 
   const body = $('table-body');
   body.textContent = '';
-  if (state.benchmark) {
-    body.appendChild(benchmarkRow(o));
-  }
+  if (state.benchmark) body.appendChild(referenceRow(m));
+
   const rows = rowsForTable();
-  const shown = rows.slice(0, 400);
+  const shown = rows.slice(0, MAX_TABLE_ROWS);
   shown.forEach((row) => {
     const tr2 = document.createElement('tr');
     tr2.tabIndex = 0;
-    if (state.selected === row.geoid) tr2.dataset.selected = 'true';
+    tr2.dataset.geoid = row.geoid;
+    if (state.pick === row.geoid) tr2.dataset.pick = 'true';
     tr2.addEventListener('click', () => selectArea(row.geoid));
+    tr2.addEventListener('focus', () => setHover(row.geoid));
+    tr2.addEventListener('blur', () => setHover(null));
     tr2.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectArea(row.geoid); }
     });
@@ -692,28 +1055,41 @@ function renderTable(o) {
         td.classList.add('missing');
         td.textContent = c.key === 'estimate' ? 'no data' : '—';
       } else {
-        td.textContent = c.key === 'moe' ? fmtMoe(row[c.key], o.unit)
-          : fmt(row[c.key], o.unit);
+        td.textContent = c.key === 'moe' ? fmtMoe(row[c.key], m.unit) : fmt(row[c.key], m.unit);
       }
       tr2.appendChild(td);
     });
     body.appendChild(tr2);
   });
 
+  const filtering = state.placeQuery.trim().length > 0;
+  const total = scopedGeoids().length;
+  $('table-title').textContent = filtering
+    ? `${rows.length.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} ${levelNoun(total)}`
+    : `${total.toLocaleString('en-US')} ${levelNoun(total)}`;
   const missing = rows.filter((r) => r.estimate === null).length;
-  $('table-title').textContent =
-    `${rows.length.toLocaleString('en-US')} ${state.level === 'county' ? 'boroughs' : 'census tracts'}`;
   $('table-note').textContent =
-    `Values are ${o.unit === 'percent' ? 'percentages of ' + o.out_of : 'counts of people'}. ` +
-    `${missing} area${missing === 1 ? '' : 's'} have no usable estimate and read "no data", ` +
-    'never zero; sorting keeps them at the end.' +
-    (rows.length > shown.length ? ` Showing the first ${shown.length}; the export contains all.` : '');
+    `Values are ${m.unit === 'percent' ? `percentages of ${m.out_of}` : 'counts of people'}. ` +
+    `${missing} area${missing === 1 ? '' : 's'} here have no usable estimate and read ` +
+    '“no data”, never zero; sorting keeps them at the end.' +
+    (rows.length > shown.length
+      ? ` Listing the first ${shown.length}; search by name or GEOID to reach the rest, and the export contains all.`
+      : '');
+  const emptyEl = $('table-empty');
+  if (!rows.length) {
+    emptyEl.hidden = false;
+    emptyEl.textContent = filtering
+      ? `No ${levelNoun(2)} in view match “${state.placeQuery.trim()}”. Clear the search to see all ${total.toLocaleString('en-US')} ${levelNoun(total)} in view.`
+      : 'No areas are in view.';
+  } else {
+    emptyEl.hidden = true;
+  }
 }
 
-function benchmarkRow(o) {
+function referenceRow(m) {
   const b = state.benchmark;
   const tr = document.createElement('tr');
-  tr.className = 'benchmark-row';
+  tr.className = 'reference-row';
   if (!b.available) {
     // A reference that was asked for and could not be built is information.
     [b.label, 'not available', '—', b.unavailable_reason || 'no reason recorded']
@@ -732,10 +1108,10 @@ function benchmarkRow(o) {
     moeText = 'none';
     note = 'reference value; controlled total, so no sampling error';
   } else if (b.moe_status === 'ok') {
-    moeText = fmtMoe(b.moe, o.unit);
+    moeText = fmtMoe(b.moe, m.unit);
     note = 'reference value';
   }
-  [b.label, b.estimate === null ? 'no data' : fmt(b.estimate, o.unit), moeText, note]
+  [b.label, b.estimate === null ? 'no data' : fmt(b.estimate, m.unit), moeText, note]
     .forEach((text, i) => {
       const td = document.createElement('td');
       if (i === 1 || i === 2) td.className = 'num';
@@ -745,100 +1121,313 @@ function benchmarkRow(o) {
   return tr;
 }
 
-function renderSourceDetails(o) {
-  const m = state.dataset.measures.find((x) => x.measure_id === state.measureId);
+/* --------------------------------------------------------- inspect panel */
+
+function selectArea(geoid, opts = {}) {
+  state.pick = geoid;
+  if (opts.focus) focusOnArea(geoid);
+  markMapSelection();
+  renderReadout();
+  renderPlaceCard();
+  renderTable();
+  if (!$('drawer').hidden) renderDrawer();
+}
+
+function clearPick() {
+  state.pick = null;
+  markMapSelection();
+  renderReadout();
+  renderPlaceCard();
+  renderTable();
+}
+
+function valueRows(geoid, m) {
+  const v = state.values?.[geoid] || {};
+  const out = [];
+  if (v.n !== undefined && v.n !== null) {
+    out.push(['Counted', `${fmt(v.n, 'persons')} people`]);
+    out.push([`Out of (${m.out_of || 'the universe'})`, `${fmt(v.d, 'persons')} people`]);
+  }
+  out.push(['Reliability', reliabilityWords(v, m.unit)]);
+  out.push(['Area code (GEOID)', geoid]);
+  return out;
+}
+
+function renderPlaceCard() {
+  const host = $('place-card');
+  const m = currentMeasure();
+  if (!m) { host.textContent = ''; return; }
+  if (!state.pick) {
+    host.innerHTML = '<p class="empty-state">Choose an area on the map, in the ' +
+      'table, or with the place search to see its estimate, its margin of error ' +
+      'and the denominator behind it.</p>';
+    return;
+  }
+  const geoid = state.pick;
+  const v = state.values?.[geoid] || {};
+  const parts = [];
+  parts.push(`<p class="pc-name">${esc(areaName(geoid))}</p>`);
+  if (v.es === 'ok') {
+    parts.push(`<p class="pc-value">${esc(fmt(v.e, m.unit))}</p>`);
+    if (isControlled(v)) {
+      parts.push('<p class="pc-moe">no sampling error — controlled to an ' +
+        'independent population estimate</p>');
+    } else if (v.ms === 'ok') {
+      parts.push(`<p class="pc-moe">${esc(fmtMoe(v.m, m.unit))} at 90% confidence</p>`);
+    } else {
+      parts.push('<p class="pc-moe pc-caveat">margin of error unavailable — ' +
+        `${esc(plainReason(v, 'm'))}. Missing uncertainty is unavailable, not zero.</p>`);
+    }
+  } else {
+    parts.push('<p class="pc-value">no data</p>');
+    parts.push(`<p class="pc-moe pc-caveat">${esc(plainReason(v, 'e'))}</p>`);
+  }
+  parts.push(`<p class="pc-unit">${esc(m.unit === 'percent'
+    ? `Percent of ${m.out_of}` : 'Number of people, not a share')} · ` +
+    `${esc(state.catalog.period_label)}</p>`);
+  parts.push('<dl class="pc-rows">' + valueRows(geoid, m)
+    .map(([k, val]) => `<div><dt>${esc(k)}</dt><dd>${esc(val)}</dd></div>`).join('') + '</dl>');
+  host.innerHTML = parts.join('');
+
+  const actions = document.createElement('div');
+  actions.className = 'pc-actions';
+  const inCompare = state.compare.includes(geoid);
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'btn';
+  add.textContent = inCompare ? 'Remove from comparison' : 'Add to comparison';
+  add.addEventListener('click', () => (inCompare ? removeFromCompare(geoid) : addToCompare(geoid)));
+  actions.appendChild(add);
+
+  const onlyThis = state.areas.length === 1 && state.areas[0] === geoid;
+  const limit = document.createElement('button');
+  limit.type = 'button';
+  limit.className = 'btn';
+  limit.textContent = onlyThis ? `Show all ${levelNoun(2)}` : 'Show only this place';
+  limit.addEventListener('click', () => setAreas(onlyThis ? [] : [geoid]));
+  actions.appendChild(limit);
+
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'btn ghost';
+  clear.textContent = 'Clear selection';
+  clear.addEventListener('click', clearPick);
+  actions.appendChild(clear);
+  host.appendChild(actions);
+}
+
+function addToCompare(geoid) {
+  if (state.compare.includes(geoid)) return;
+  if (state.compare.length >= 2) {
+    toast('Two places at a time. Remove one first — a comparison a reader can ' +
+      'check is a comparison they can hold in their head.');
+    return;
+  }
+  state.compare.push(geoid);
+  markMapSelection();
+  renderComparePanel();
+  renderPlaceCard();
+}
+
+function removeFromCompare(geoid) {
+  state.compare = state.compare.filter((g) => g !== geoid);
+  markMapSelection();
+  renderComparePanel();
+  renderPlaceCard();
+}
+
+function renderComparePanel() {
+  const host = $('compare-panel');
+  const m = currentMeasure();
+  host.textContent = '';
   if (!m) return;
-  const cells = (m.cells || []).map((c) =>
+  if (!state.compare.length) {
+    host.innerHTML = '<p class="empty-state">Add up to two places to compare them ' +
+      'side by side inside this one reference period.</p>';
+    return;
+  }
+  state.compare.forEach((geoid, i) => {
+    const v = state.values?.[geoid] || {};
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    slot.dataset.slot = i === 0 ? 'a' : 'b';
+    const body = document.createElement('div');
+    body.className = 'slot-body';
+    const value = v.es === 'ok' ? fmt(v.e, m.unit) : 'no data';
+    const moe = v.es === 'ok'
+      ? (isControlled(v) ? 'no sampling error (controlled total)'
+        : (v.ms === 'ok' ? `${fmtMoe(v.m, m.unit)} at 90% confidence`
+          : 'margin of error unavailable'))
+      : plainReason(v, 'e');
+    body.innerHTML = `<div class="slot-name">${esc(areaName(geoid))}</div>` +
+      `<div class="slot-val">${esc(value)}</div>` +
+      `<div class="muted tiny">${esc(moe)}</div>`;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'btn ghost';
+    rm.textContent = 'Remove';
+    rm.setAttribute('aria-label', `Remove ${areaName(geoid)} from the comparison`);
+    rm.addEventListener('click', () => removeFromCompare(geoid));
+    slot.append(body, rm);
+    host.appendChild(slot);
+  });
+
+  if (state.compare.length === 2) {
+    const [a, b] = state.compare.map((g) => state.values?.[g] || {});
+    const line = document.createElement('div');
+    line.className = 'diff-line';
+    if (a.es === 'ok' && b.es === 'ok') {
+      const diff = a.e - b.e;
+      const unitWord = m.unit === 'percent' ? 'percentage points' : 'people';
+      const size = m.unit === 'percent'
+        ? Math.abs(diff).toFixed(1) : Math.round(Math.abs(diff)).toLocaleString('en-US');
+      line.innerHTML =
+        `<span class="diff-value">${esc(size)} ${esc(unitWord)}</span> ` +
+        `${esc(diff >= 0 ? 'higher in' : 'lower in')} ${esc(areaName(state.compare[0]))} ` +
+        `than ${esc(areaName(state.compare[1]))}.` +
+        '<span class="diff-note">This is the difference between two published ' +
+        'estimates in the same reference period. This build does not test whether ' +
+        'that difference is statistically significant, so do not describe it as ' +
+        'one. Read both margins of error above.</span>';
+    } else {
+      line.innerHTML = '<span class="diff-value">No difference is shown.</span>' +
+        '<span class="diff-note">At least one of these places has no published ' +
+        'estimate for this measure, and a missing value is not a zero.</span>';
+    }
+    host.appendChild(line);
+
+    const limit = document.createElement('div');
+    limit.className = 'pc-actions';
+    const both = document.createElement('button');
+    both.type = 'button';
+    both.className = 'btn';
+    const isLimited = state.areas.length === 2 &&
+      state.compare.every((g) => state.areas.includes(g));
+    both.textContent = isLimited ? `Show all ${levelNoun(2)}` : 'Show only these two';
+    both.addEventListener('click', () => setAreas(isLimited ? [] : [...state.compare]));
+    const clearBoth = document.createElement('button');
+    clearBoth.type = 'button';
+    clearBoth.className = 'btn ghost';
+    clearBoth.textContent = 'Clear comparison';
+    clearBoth.addEventListener('click', () => {
+      state.compare = [];
+      markMapSelection();
+      renderComparePanel();
+      renderPlaceCard();
+    });
+    limit.append(both, clearBoth);
+    host.appendChild(limit);
+  }
+}
+
+function renderBenchmarkCard() {
+  const host = $('benchmark-card');
+  const m = currentMeasure();
+  const chosen = state.benchmarks.find((b) => b.benchmark_id === state.benchmarkId);
+  if (!state.benchmark) {
+    host.innerHTML = `<p class="muted tiny">${esc(chosen ? chosen.description : '')}</p>`;
+    return;
+  }
+  const b = state.benchmark;
+  if (!b.available) {
+    host.innerHTML = `<p class="pc-caveat">${esc(b.label)} is not available here.</p>` +
+      `<p class="muted tiny">${esc(b.unavailable_reason || 'no reason recorded')}</p>`;
+    return;
+  }
+  const moe = b.controlled ? 'no sampling error (controlled total)'
+    : (b.moe_status === 'ok' ? `${fmtMoe(b.moe, m.unit)} at 90% confidence`
+      : 'margin of error unavailable');
+  host.innerHTML = `<p class="pc-name">${esc(b.label)}</p>` +
+    `<p class="pc-value">${esc(b.estimate === null ? 'no data' : fmt(b.estimate, m.unit))}</p>` +
+    `<p class="pc-moe">${esc(moe)}</p>` +
+    `<p class="muted tiny">${esc(b.basis)}</p>`;
+}
+
+function renderSourceDetails() {
+  const m = currentMeasure();
+  const full = state.dataset.measures.find((x) => x.measure_id === state.measureId);
+  if (!m || !full) return;
+  const cells = (full.cells || []).map((c) =>
     `<li>${esc(c.cell)} — ${esc(c.label)}<br><span class="muted">estimate ` +
     `${esc(c.estimate_var)}, margin of error ${esc(c.moe_var || 'none published')}` +
     `</span></li>`).join('');
   $('source-details').innerHTML =
-    `<dl><dt>Published universe</dt><dd>${esc(m.universe_published?.[0] || m.universe_note)}</dd>` +
-    `<dt>Definition</dt><dd>${esc(m.definition_note)}</dd>` +
-    `<dt>Tables</dt><dd>${esc((m.tables || []).join(', '))}</dd>` +
-    `<dt>Numerator cells</dt><dd class="codes">${esc((m.numerator_cells || []).join(' + '))}</dd>` +
-    `<dt>Denominator cells</dt><dd class="codes">${esc((m.denominator_cells || []).join(' + ') || 'not applicable')}</dd>` +
+    `<dl><dt>Published universe</dt><dd>${esc(full.universe_published?.[0] || full.universe_note)}</dd>` +
+    `<dt>Measure denominator</dt><dd>${esc(m.unit === 'percent' ? m.out_of : 'not applicable — this is a count')}</dd>` +
+    `<dt>Definition</dt><dd>${esc(full.definition_note)}</dd>` +
+    `<dt>Tables</dt><dd>${esc((full.tables || []).join(', '))}</dd>` +
+    `<dt>Numerator cells</dt><dd class="codes">${esc((full.numerator_cells || []).join(' + '))}</dd>` +
+    `<dt>Denominator cells</dt><dd class="codes">${esc((full.denominator_cells || []).join(' + ') || 'not applicable')}</dd>` +
     `<dt>Source</dt><dd>${esc(state.dataset.release.citation)}</dd></dl>` +
     `<ul class="codes">${cells}</ul>`;
 }
 
 /* ---------------------------------------------------------------- drawer */
 
-function selectArea(geoid) {
-  state.selected = geoid;
-  toggleDrawer(true);
-  drawMap();
-  renderTable(currentOption());
-}
-
 function toggleDrawer(force) {
   const d = $('drawer');
   const open = force === undefined ? d.hidden : force;
   d.hidden = !open;
-  document.body.classList.toggle('drawer-open', open);
-  $('btn-quality').setAttribute('aria-expanded', String(open));
-  if (open) renderDrawer();
+  $('btn-method').setAttribute('aria-expanded', String(open));
+  if (open) { renderDrawer(); $('drawer-close').focus(); }
+  else $('btn-method').focus();
+}
+
+function toggleSavePanel(force) {
+  const p = $('save-panel');
+  const open = force === undefined ? p.hidden : force;
+  p.hidden = !open;
+  $('btn-save').setAttribute('aria-expanded', String(open));
+  if (open) { renderProjects(); $('project-id').focus(); }
 }
 
 function renderDrawer() {
-  const o = currentOption();
+  const m = currentMeasure();
   const q = state.quality;
-  if (!o || !q) return;
+  if (!m || !q) return;
+  const full = state.dataset.measures.find((x) => x.measure_id === state.measureId);
   const parts = [];
 
-  if (state.selected) {
-    const v = state.values?.[state.selected] || {};
-    const area = state.dataset.areas.find((a) => a.geoid === state.selected);
-    parts.push(`<h3>${esc(area ? area.name : state.selected)}</h3><dl>`);
-    parts.push(`<dt>Estimate</dt><dd>${v.es === 'ok'
-      ? esc(fmt(v.e, o.unit)) : `<span class="caveat">unavailable — ${esc(v.er || 'no reason recorded')}</span>`}</dd>`);
-    parts.push(`<dt>Margin of error</dt><dd>${v.ms === 'ok'
-      ? (isControlled(v)
-        ? 'none — controlled to an independent population estimate'
-        : `${esc(fmtMoe(v.m, o.unit))} at 90% confidence`)
-      : `<span class="caveat">unavailable — ${esc(plainReason(v, 'm'))}. Missing uncertainty is unavailable, not zero.</span>`}</dd>`);
-    if (v.cv !== undefined && v.cv !== null) {
-      parts.push(`<dt>Relative error</dt><dd>${v.cv.toFixed(1)}% — ${esc(v.rel)}</dd>`);
-    }
-    if (v.n !== undefined) {
-      parts.push(`<dt>Counted</dt><dd>${esc(fmt(v.n, 'persons'))} people</dd>`);
-      parts.push(`<dt>Out of</dt><dd>${esc(fmt(v.d, 'persons'))} people</dd>`);
-    }
-    parts.push(`<dt>Area code</dt><dd>${esc(state.selected)}</dd>`);
-    parts.push('</dl>');
-    if (v.flags && v.flags.length) {
-      parts.push('<h3>Source flags</h3><ul>' +
-        v.flags.map((f) => `<li>${esc(f)}</li>`).join('') + '</ul>');
-    }
-  }
+  parts.push('<h3>What is being shown</h3>');
+  parts.push(`<p><strong>${esc(m.label)}</strong></p>`);
+  parts.push(`<p>We are counting ${esc(m.counts_what)}.</p>`);
+  parts.push(`<p>${esc(m.unit === 'percent'
+    ? `Shown as a percentage of ${m.out_of}.`
+    : 'Shown as a number of people, not a share, so it reflects how large the place is as well as its composition.')}</p>`);
+  parts.push(`<p>${esc(state.catalog.period_label)} — a five-year period estimate, ` +
+    'not a single year.</p>');
 
   [['Uncertainty', q.uncertainty], ['Comparison', q.comparison], ['Period', q.freshness]]
     .forEach(([title, panel]) => {
+      if (!panel) return;
       parts.push(`<h3>${esc(title)}</h3>`);
       parts.push(`<p class="state ${esc(panel.class)}">${esc(panel.state)}</p>`);
       panel.lines.forEach((line) => parts.push(`<p>${esc(line)}</p>`));
     });
 
   parts.push('<h3>What this does not say</h3>');
-  state.question.not_answered.forEach((x) => parts.push(`<p class="caveat">${esc(x)}</p>`));
-  const m = state.dataset.measures.find((x) => x.measure_id === state.measureId);
-  (m?.caveats || []).forEach((x) => parts.push(`<p class="caveat">${esc(x)}</p>`));
+  if (state.level === 'tract') {
+    parts.push('<p class="caveat">Census tracts are statistical areas, not ' +
+      'neighbourhoods. This build has no documented neighbourhood boundaries.</p>');
+    parts.push('<p class="caveat">Tract estimates carry large margins of error. ' +
+      'Read the reliability column before quoting a single tract.</p>');
+  }
+  parts.push('<p class="caveat">A birthplace count is a stock: how many residents ' +
+    'were born in that place. It is not a count of recent arrivals and says ' +
+    'nothing about when or whether anyone moved here.</p>');
+  parts.push('<p class="caveat">A difference between two places is not tested for ' +
+    'statistical significance anywhere in this build.</p>');
+  (full?.caveats || []).forEach((x) => parts.push(`<p class="caveat">${esc(x)}</p>`));
+
+  parts.push('<h3>Source</h3>');
+  parts.push(`<p>${esc(state.dataset.release.citation)}</p>`);
+  parts.push(`<p>Boundaries: ${esc(state.dataset.release.geography_vintage)}. ` +
+    'Generalized for display; not legal boundary descriptions.</p>');
 
   $('drawer-body').innerHTML = parts.join('');
 }
 
 /* --------------------------------------------------------- brief + export */
-
-function briefQuery() {
-  return `/api/brief?${selectionQuery()}` +
-    `&question=${encodeURIComponent(state.questionId)}` +
-    `&benchmark=${encodeURIComponent(state.benchmarkId)}`;
-}
-
-function openBrief() {
-  window.open(briefQuery(), '_blank', 'noopener');
-  toast('The brief opened in a new tab. Use your browser’s print dialog to save it as PDF.');
-}
 
 async function doExport() {
   try {
@@ -846,15 +1435,15 @@ async function doExport() {
       release_id: state.releaseId,
       measure_id: state.measureId,
       level: state.level,
-      areas: selectedGeoids(),
+      areas: scopedGeoids(),
       question_id: state.questionId,
       benchmark_id: state.benchmarkId,
-      figure_kind: state.level === 'tract' ? 'map' : 'chart',
+      figure_kind: state.level === 'tract' || scopedGeoids().length > 8 ? 'map' : 'chart',
       include_figure: true,
     });
     toast(`Exported ${res.rows} rows over ${res.selection.area_count} areas to ` +
-      `${res.export_dir}: brief.html, data.csv, provenance.json, figure.svg.`);
-  } catch (e) { toast(`Export failed: ${e.message}`); }
+      `${res.export_dir}: brief.html, data.csv, provenance.json, figure.svg.`, 8000);
+  } catch (e) { toast(`Export failed: ${e.message}`, 8000); }
 }
 
 /* -------------------------------------------------------------- projects */
@@ -862,23 +1451,23 @@ async function doExport() {
 async function saveProject(event) {
   event.preventDefault();
   const id = $('project-id').value.trim();
-  if (!id) { toast('Give the brief a short name first.'); return; }
+  if (!id) { toast('Give the view a short name first.'); return; }
   try {
     const res = await post('/api/projects', {
       project_id: id,
-      title: `${currentOption().label} — ${state.catalog.period_label}`,
+      title: `${currentMeasure().label} — ${state.catalog.period_label}`,
       release_id: state.releaseId,
       measure_id: state.measureId,
       level: state.level,
-      areas: selectedGeoids(),
+      areas: scopedGeoids(),
       question_id: state.questionId,
       benchmark_id: state.benchmarkId,
     });
-    toast(`Saved "${res.saved}", pinning ${res.pinned_inputs} input files. Reopening ` +
-      'checks them and refuses rather than showing different numbers.');
+    toast(`Saved “${res.saved}”, pinning ${res.pinned_inputs} input files. Reopening ` +
+      'checks them and refuses rather than showing different numbers.', 7000);
     $('project-id').value = '';
     renderProjects();
-  } catch (e) { toast(`Could not save: ${e.message}`); }
+  } catch (e) { toast(`Could not save: ${e.message}`, 8000); }
 }
 
 async function renderProjects() {
@@ -887,19 +1476,19 @@ async function renderProjects() {
   let items = [];
   try { items = (await api('/api/projects')).projects; } catch { /* optional */ }
   if (!items.length) {
-    list.innerHTML = '<li class="muted small">Nothing saved yet.</li>';
+    list.innerHTML = '<li class="muted tiny">Nothing saved yet.</li>';
     return;
   }
   items.forEach((p) => {
     const li = document.createElement('li');
     const open = document.createElement('button');
     open.type = 'button';
-    open.className = 'button ghost p-name';
-    open.innerHTML = `${esc(p.project_id)}<span class="p-q">${esc(p.question_id || 'saved view')}</span>`;
+    open.className = 'btn ghost p-name';
+    open.innerHTML = `${esc(p.project_id)}<span class="p-q">${esc(p.measure_id || 'saved view')}</span>`;
     open.addEventListener('click', () => reopen(p.project_id));
     const del = document.createElement('button');
     del.type = 'button';
-    del.className = 'button ghost';
+    del.className = 'btn ghost';
     del.textContent = 'delete';
     del.setAttribute('aria-label', `Delete ${p.project_id}`);
     del.addEventListener('click', async () => {
@@ -917,13 +1506,13 @@ async function reopen(projectId) {
     replay = await api(`/api/project?id=${encodeURIComponent(projectId)}`);
   } catch (e) {
     if (e.kind === 'pin_mismatch') {
-      showBlocked(`"${projectId}" was not reopened`, [
+      showBlocked(`“${projectId}” was not reopened`, [
         e.message,
         'Nothing was substituted and nothing was re-fetched.',
       ]);
-      toast(`"${projectId}" was not reopened: its inputs changed since it was saved.`, 9000);
+      toast(`“${projectId}” was not reopened: its inputs changed since it was saved.`, 9000);
     } else {
-      toast(`Could not reopen ${projectId}: ${e.message}`);
+      toast(`Could not reopen ${projectId}: ${e.message}`, 8000);
     }
     return;
   }
@@ -934,19 +1523,21 @@ async function reopen(projectId) {
   state.measureId = p.measure_id;
   state.areas = p.areas || [];
   state.benchmarkId = brief.benchmark_id || 'none';
-  if (brief.question_id) {
-    state.questionId = brief.question_id;
-    state.question = state.catalog.questions.find((q) => q.question_id === brief.question_id);
-    state.options = state.question ? state.question.measures : state.options;
-  }
-  renderQuestions();
-  renderPlaceControls();
-  renderMeasureOptions();
+  state.pick = null;
+  state.compare = [];
+  state.placeQuery = '';
+  $('place-search').value = '';
+  state.measureFilter = '';
+  $('measure-search').value = '';
+  fitMap();
+  renderLevelSwitch();
+  renderSidebar();
   await loadBenchmarks();
   await refresh();
+  toggleSavePanel(false);
   const n = replay.pin?.input_count ?? 0;
-  toast(`Reopened "${projectId}". All ${n} pinned input files were present and ` +
-    'unchanged, so this is the brief that was saved.', 7000);
+  toast(`Reopened “${projectId}”. All ${n} pinned input files were present and ` +
+    'unchanged, so this is the view that was saved.', 7000);
 }
 
 function renderFooter() {
@@ -960,5 +1551,5 @@ function renderFooter() {
 
 boot().catch((e) => {
   $('startup').innerHTML =
-    `<p class="blocked-note"><strong>Could not start</strong>${esc(e.message)}</p>`;
+    `<p class="blocked"><strong>Could not start</strong>${esc(e.message)}</p>`;
 });

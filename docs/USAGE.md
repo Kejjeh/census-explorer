@@ -100,10 +100,45 @@ Census Explorer service on http://127.0.0.1:8765/
 The service refuses to bind to anything but loopback and refuses requests whose
 `Host` header is not a loopback name.
 
-In the browser: search the catalog on the left, pick a measure, switch the
-period and geography above the map, click a borough or tract (or press Enter on
-a table row) to open the sources-and-uncertainty drawer, name a project and save
-it, and export a CSV + provenance + figure bundle.
+In the browser, the journey is:
+
+1. **Choose the geography** with the Boroughs / Census tracts switch at the top
+   of the left sidebar. The note under it says how many areas that level has and
+   what they are — census tracts are statistical areas, not neighbourhoods.
+2. **Choose a topic.** The sidebar lists every measure this build carries at
+   that level, grouped by the published concept (Population, Born in the U.S. or
+   abroad, Citizenship, Birthplace of foreign-born residents, Education by place
+   of birth, Race and place of birth). Search by name, or filter to Shares or
+   Counts. A name match wins over a description match.
+3. **Read the map.** Zoom with the wheel or the `+` / `−` buttons, drag to pan,
+   `Fit` to reset. With the map focused, arrow keys pan, `+` and `−` zoom and `0`
+   fits. Hovering or focusing an area shows its value and margin of error in the
+   readout at the bottom left.
+4. **Find a place** with the search above the map — borough or tract, by
+   published name or by GEOID. There is no address search and no neighbourhood
+   geography in this build, and a search that matches nothing says so. The same
+   search filters the table below.
+5. **Inspect a place** by clicking it on the map, clicking or pressing Enter on
+   a table row, or picking it from the place search. The right-hand panel gives
+   the estimate, the margin of error (or why there is none), the numerator, the
+   denominator by name, the reliability wording and the GEOID.
+6. **Compare** by adding up to two places to the comparison. The panel states
+   the difference between the two published estimates and says, in the same
+   breath, that this build does not test whether that difference is
+   statistically significant.
+7. **Add a reference** — New York City built from the five boroughs' underlying
+   counts, or the selected places combined — or read why one is unavailable.
+8. **Scope the output.** "Show only this place" narrows the map, the table, the
+   brief and the export together; the scope bar above the map always says what
+   the export will cover.
+9. **Save and export.** Saving pins the content digests of every input file;
+   reopening verifies them and refuses rather than showing different numbers.
+   Export writes `brief.html`, `data.csv`, `provenance.json` and `figure.svg`
+   for exactly the areas in scope.
+
+"Method & sources" opens a drawer with what is being shown, the three quality
+statements, what the view does not say, and the citation. Published table codes
+stay in a details panel in the right-hand column.
 
 ## 5. Verify (all offline)
 

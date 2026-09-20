@@ -7,123 +7,163 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip-link" href="#workspace">Skip to the workspace</a>
+<a class="skip-link" href="#stage">Skip to the map</a>
 <div id="mode-banner" class="mode-banner" hidden></div>
 
 <header class="topbar">
   <div class="brand">
-    <h1>Census Explorer</h1>
-    <p class="tagline">Turn a question about a place into a brief someone can
-      check and reuse.</p>
+    <span class="mark" aria-hidden="true"></span>
+    <span class="brand-name">Census Explorer</span>
   </div>
-  <p class="period-chip" id="period-chip"></p>
+  <p class="release-chip" id="release-chip">
+    <span class="chip-label">Release</span>
+    <span class="chip-value" id="release-value">…</span>
+  </p>
+  <div class="topbar-actions">
+    <button type="button" class="btn" id="btn-method" aria-expanded="false"
+            aria-controls="drawer">Method &amp; sources</button>
+    <button type="button" class="btn" id="btn-save" aria-expanded="false"
+            aria-controls="save-panel">Saved views</button>
+    <button type="button" class="btn primary" id="btn-export">Export</button>
+  </div>
 </header>
 
 <div id="startup" class="startup" aria-live="polite">
   <p class="muted">Loading the built dataset…</p>
 </div>
 
-<main class="workspace" id="workspace" hidden>
-  <aside class="panel" aria-label="Build your question">
-    <ol class="steps">
-      <li class="step" data-step="1">
-        <h2><span class="step-n">1</span> Start with a question</h2>
-        <div id="question-list" class="question-list" role="radiogroup"
-             aria-label="Starting question"></div>
-      </li>
+<div id="save-panel" class="save-panel" hidden>
+  <form id="save-form" class="save-form">
+    <label class="field">
+      <span>Save this view as</span>
+      <input type="text" id="project-id" placeholder="bronx-naturalisation"
+             pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
+    </label>
+    <button type="submit" class="btn primary">Save</button>
+  </form>
+  <p class="hint">Saving pins the exact input files. Reopening checks them and
+    refuses rather than showing different numbers.</p>
+  <ul id="project-list" class="project-list"></ul>
+</div>
 
-      <li class="step" data-step="2">
-        <h2><span class="step-n">2</span> Choose the place</h2>
-        <p class="step-hint" id="place-prompt"></p>
-        <div id="place-controls"></div>
-      </li>
+<main class="shell" id="shell" hidden>
 
-      <li class="step" data-step="3">
-        <h2><span class="step-n">3</span> Choose what to show</h2>
-        <p class="step-hint" id="measure-prompt"></p>
-        <label class="field">
-          <span class="visually-hidden">Filter the list</span>
-          <input type="search" id="measure-search" placeholder="Filter this list…"
-                 autocomplete="off">
-        </label>
-        <div id="measure-select" class="measure-list" role="listbox"
-             aria-label="Measure"></div>
-        <label class="field">
-          <span id="benchmark-prompt">Compare against</span>
-          <select id="benchmark-select"></select>
-        </label>
-        <p class="step-hint" id="benchmark-note"></p>
-      </li>
-    </ol>
+  <aside class="sidebar" aria-label="Topics and measures">
+    <div class="sidebar-inner">
+      <div class="level-switch" role="radiogroup" aria-label="Geography">
+        <button type="button" role="radio" data-level="county" aria-checked="true">Boroughs</button>
+        <button type="button" role="radio" data-level="tract" aria-checked="false">Census tracts</button>
+      </div>
+      <p class="level-note" id="level-note"></p>
 
-    <div class="panel-block">
-      <h2 class="side-heading">Saved briefs</h2>
-      <form id="save-form" class="save-form">
-        <label class="field">
-          <span>Save this brief as</span>
-          <input type="text" id="project-id" placeholder="queens-profile"
-                 pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
-        </label>
-        <button type="submit" class="button">Save</button>
-      </form>
-      <ul id="project-list" class="project-list"></ul>
+      <label class="field search-field">
+        <span class="visually-hidden">Search topics and measures</span>
+        <input type="search" id="measure-search" placeholder="Search topics…"
+               autocomplete="off" aria-describedby="measure-count">
+      </label>
+      <div class="chips" role="group" aria-label="Filter by unit">
+        <button type="button" class="chip" data-unit="all" aria-pressed="true">All</button>
+        <button type="button" class="chip" data-unit="percent" aria-pressed="false">Shares</button>
+        <button type="button" class="chip" data-unit="persons" aria-pressed="false">Counts</button>
+      </div>
+      <p class="muted tiny" id="measure-count"></p>
+
+      <div id="topic-groups" class="topic-groups" role="listbox"
+           aria-label="Measure"></div>
     </div>
   </aside>
 
-  <section class="stage">
-    <div id="selection-summary" class="summary" aria-live="polite"></div>
-    <div id="blocked" class="blocked-note" hidden></div>
-
+  <section class="stage" id="stage" tabindex="-1">
     <div class="stage-head">
-      <h2 id="measure-title">—</h2>
-      <div class="stage-actions">
-        <button type="button" class="button" id="btn-quality" aria-expanded="false"
-                aria-controls="drawer">How far to trust this</button>
-        <button type="button" class="button primary" id="btn-brief">Open the brief</button>
-        <button type="button" class="button" id="btn-export">Export brief + data</button>
+      <div class="stage-title">
+        <h1 id="measure-title">—</h1>
+        <p class="denominator" id="denominator-line"></p>
+      </div>
+      <div class="place-find">
+        <label class="field search-field">
+          <span class="visually-hidden">Find a place by name or identifier</span>
+          <input type="search" id="place-search" autocomplete="off"
+                 placeholder="Find a borough or tract…"
+                 role="combobox" aria-expanded="false" aria-autocomplete="list"
+                 aria-controls="place-results">
+        </label>
+        <ul id="place-results" class="place-results" role="listbox"
+            aria-label="Matching places" hidden></ul>
       </div>
     </div>
 
+    <div id="scope-bar" class="scope-bar" aria-live="polite"></div>
+
+    <div id="blocked" class="blocked" hidden></div>
+
     <figure class="map-figure">
-      <div id="map" class="map" role="group" aria-label="Map"></div>
+      <div class="map-frame">
+        <div id="map" class="map" tabindex="0" role="application"
+             aria-label="Map of the selected measure. Arrow keys pan, plus and minus zoom, 0 fits. The table below lists every value."></div>
+        <div class="map-tools" role="group" aria-label="Map view">
+          <button type="button" class="tool" id="zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" class="tool" id="zoom-out" aria-label="Zoom out">−</button>
+          <button type="button" class="tool wide" id="zoom-fit">Fit</button>
+        </div>
+        <div id="readout" class="readout" aria-live="polite"></div>
+        <div id="map-empty" class="map-empty" hidden></div>
+      </div>
       <div id="legend" class="legend"></div>
-      <figcaption class="muted small" id="map-caption"></figcaption>
+      <figcaption class="muted tiny" id="map-caption"></figcaption>
     </figure>
 
-    <div class="table-wrap">
-      <div class="table-head">
-        <h3 id="table-title">Areas</h3>
-        <p class="muted small" id="table-note"></p>
+    <div class="table-block">
+      <div class="table-head-row">
+        <h2 id="table-title">Areas</h2>
+        <p class="muted tiny" id="table-note"></p>
       </div>
       <div class="table-scroll">
         <table id="data-table">
           <caption class="visually-hidden">
-            Estimates by area, with margins of error. This table carries the same
-            values as the map.
+            Estimates by area with margins of error. Same values as the map;
+            each row selects the same area the map does.
           </caption>
           <thead id="table-head"></thead>
           <tbody id="table-body"></tbody>
         </table>
       </div>
+      <p id="table-empty" class="empty-state" hidden></p>
     </div>
-
-    <details class="codes-panel">
-      <summary>Source details, including the published table codes</summary>
-      <div id="source-details"></div>
-    </details>
   </section>
+
+  <aside class="inspect" id="inspect" aria-label="Selected place">
+    <div class="inspect-inner">
+      <h2 class="panel-heading">Selected place</h2>
+      <div id="place-card" class="place-card"></div>
+
+      <h2 class="panel-heading">Compare</h2>
+      <div id="compare-panel" class="compare-panel"></div>
+
+      <h2 class="panel-heading">Reference</h2>
+      <label class="field">
+        <span class="visually-hidden">Compare against a reference</span>
+        <select id="benchmark-select"></select>
+      </label>
+      <div id="benchmark-card" class="benchmark-card"></div>
+
+      <details class="codes-panel">
+        <summary>Published table codes</summary>
+        <div id="source-details"></div>
+      </details>
+    </div>
+  </aside>
 </main>
 
-<aside id="drawer" class="drawer" hidden aria-label="Quality and sources">
+<aside id="drawer" class="drawer" hidden aria-label="Method and sources">
   <div class="drawer-head">
-    <h2 id="drawer-title">How far to trust this</h2>
-    <button type="button" class="button ghost" id="drawer-close">Close</button>
+    <h2>Method &amp; sources</h2>
+    <button type="button" class="btn ghost" id="drawer-close">Close</button>
   </div>
   <div id="drawer-body" class="drawer-body"></div>
 </aside>
 
 <footer class="footer">
-  <p id="footer-provenance" class="muted small"></p>
+  <p id="footer-provenance" class="muted tiny"></p>
 </footer>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

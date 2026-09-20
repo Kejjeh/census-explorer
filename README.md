@@ -19,7 +19,7 @@ no telemetry, and the local service holds no credentials.
 
 | Capability | State |
 | --- | --- |
-| Three guided questions mapped to validated measures | Working |
+| Topic sidebar over every measure the build carries, grouped by published concept | Working; 47 measures at borough and tract level |
 | Plain-language selection summary: what is counted, out of what | Working |
 | Compatible benchmark built by adding underlying counts | Working; a named composite is refused unless its whole documented membership is present |
 | Quality as three separate statements, no combined score | Working |
@@ -29,12 +29,12 @@ no telemetry, and the local service holds no credentials.
 | Immutable raw cache, checksums, retrieval timestamps, manifests | Working; `verify manifests` re-hashes every artifact |
 | Reconciliation against an independently published official row | Working; 6/6 cells match exactly in both releases |
 | Matching-vintage Census polygons, string GEOIDs, join accounting | Working; boroughs and 2,324 tracts |
-| Local browser app: catalog, map, sortable table, detail drawer | Working |
+| Local browser app: map workspace, topic sidebar, place search, inspect and compare panel, sortable table | Working |
 | Saved projects, CSV + provenance export, SVG figure export | Working |
-| Comparing places within one period | Working; needs no boundary equivalence |
+| Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 280 tests, no network |
+| Offline test suite | Working: 304 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
@@ -229,6 +229,16 @@ one rather than failing.
   population.
 - **Research codes stay in a details panel**, not in the primary navigation,
   and travel with every export.
+- **The sidebar offers what the build carries, and nothing else.** A measure is
+  listed at a geography level only when the build recorded it as available
+  there, and a measure the sidebar lists always resolves to a question the
+  brief can render — a test asserts both, in both directions.
+- **A difference is a difference, not a finding.** Two places can be compared
+  inside one reference period, and the panel states the arithmetic difference
+  next to both margins of error. It does not test significance and says so.
+- **A search that finds nothing says what this build can find.** There is no
+  address search and no neighbourhood geography here; the empty result says
+  that rather than leaving a blank box.
 
 ## Layout
 

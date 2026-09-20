@@ -686,6 +686,65 @@ def quality_report(state: ServiceState, sel: selection_mod.Selection,
             "freshness": freshness}
 
 
+#: What each geography level is called in the interface, and in what order it
+#: is offered. Keyed by the level names the built dataset uses.
+LEVEL_LABELS = {
+    "county": ("Boroughs", "five counties, each a New York City borough"),
+    "tract": ("Census tracts",
+              "statistical areas published by the Census Bureau, not neighbourhoods"),
+}
+
+
+def measure_catalog(state: ServiceState, release_id: str) -> dict:
+    """Every measure the explorer can offer, grouped for the topic sidebar.
+
+    One payload covers both levels so that switching level does not have to
+    wait on the network. Availability is read per level from the build, so a
+    level never offers a measure the build did not compute for it.
+    """
+    dataset = state.dataset(release_id)
+    counts: dict[str, int] = {}
+    for area in dataset.get("areas", []):
+        counts[area["level"]] = counts.get(area["level"], 0) + 1
+    by_id = {m["measure_id"]: m for m in dataset.get("measures", [])}
+
+    levels = {}
+    for level in [lv for lv in LEVEL_LABELS if lv in counts]:
+        groups: dict[str, list[dict]] = {}
+        for option in questions_mod.catalog(dataset, level):
+            entry = by_id[option.measure_id]
+            concept = entry.get("concept") or "Other"
+            heading = questions_mod.CONCEPT_GROUPS.get(concept, concept)
+            groups.setdefault(heading, []).append({
+                **option.to_json(),
+                "concept": concept,
+                "tables": entry.get("tables", []),
+                "topics": entry.get("topics", []),
+                "definition_note": entry.get("definition_note", ""),
+                "universe_published": entry.get("universe_published", []),
+                "caveats": entry.get("caveats", []),
+            })
+        ordered = [questions_mod.CONCEPT_GROUPS.get(c, c)
+                   for c in questions_mod.CONCEPT_ORDER]
+        heads = [h for h in ordered if h in groups]
+        heads += [h for h in groups if h not in heads]
+        label, note = LEVEL_LABELS[level]
+        levels[level] = {
+            "level": level, "label": label, "note": note,
+            "area_count": counts[level],
+            "measure_count": sum(len(groups[h]) for h in heads),
+            "groups": [{"heading": h, "measures": groups[h]} for h in heads],
+        }
+
+    return {
+        "release_id": release_id,
+        "period_label": dataset["release"]["period_label"],
+        "product_label": dataset["release"]["product_label"],
+        "levels": levels,
+        "level_order": [lv for lv in LEVEL_LABELS if lv in levels],
+    }
+
+
 def brief_context(state: ServiceState, sel: selection_mod.Selection,
                   question_id: str, benchmark_id: str = benchmark_mod.NONE,
                   analyst_note: str = "", figure_kind: str = "",
@@ -743,7 +802,7 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
         option, places, len(sel.areas), sel.level, release.period_label,
         bench["label"] if bench and bench.get("available") else None)
 
-    limitations = list(question.not_answered)
+    limitations = questions_mod.base_limitations(question, sel.level)
     limitations.extend(measure.caveats)
     if len(ranked) > len(shown):
         limitations.append(
@@ -1213,6 +1272,10 @@ class Handler(BaseHTTPRequestHandler):
                 },
             })
 
+        if path == "/api/catalog":
+            release = one("release") or st.config.raw["explorer"]["default_release"]
+            return self._json(measure_catalog(st, release))
+
         if path == "/api/benchmarks":
             release = one("release") or st.config.raw["explorer"]["default_release"]
             level = one("level", "county")
@@ -1230,13 +1293,22 @@ class Handler(BaseHTTPRequestHandler):
             sel = build_selection(st, _selection_payload(query))
             values = st.values(sel.primary_release.release_id,
                                sel.primary_measure.measure_id)
-            return self._json({"quality": quality_report(st, sel, values),
-                               "selection": sel.to_json()})
+            return self._json({
+                "quality": quality_report(st, sel, values),
+                "selection": sel.to_json(),
+                # Resolved here rather than in the page: the rule that maps a
+                # selection to the question that frames its brief lives in one
+                # place, and the brief refuses a measure the question does not
+                # list.
+                "question_id": questions_mod.question_for(
+                    sel.primary_measure.measure_id, sel.level, len(sel.areas)),
+            })
 
         if path == "/api/brief":
             sel = build_selection(st, _selection_payload(query))
             html_text = render_brief(
-                st, sel, one("question", questions_mod.WHO_LIVES_HERE),
+                st, sel, one("question") or questions_mod.question_for(
+                    sel.primary_measure.measure_id, sel.level, len(sel.areas)),
                 one("benchmark", benchmark_mod.NONE),
                 one("note", "") or "", one("figure", "") or "")
             return self._send(200, html_text.encode("utf-8"),

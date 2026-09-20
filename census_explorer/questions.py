@@ -228,11 +228,149 @@ def _birthplace_options() -> list[MeasureOption]:
     return out
 
 
+#: Measures from the education and race tables. Each denominator below is the
+#: measure's own denominator cell as the catalog defines it, not the source
+#: table's published universe: B06009 publishes everything out of "Population
+#: 25 years and over", but a share of foreign-born adults divides by the
+#: foreign-born row of that table, and saying otherwise would name a quantity
+#: the measure does not compute.
+_EDUCATION_AND_RACE_MEASURES = [
+    MeasureOption("adults_25_plus_population", "Adults aged 25 and over (number)",
+                  "residents aged 25 and over", "", "persons"),
+    MeasureOption("bachelors_plus_share_foreign_born",
+                  "Foreign-born adults 25+ with a bachelor's degree or higher",
+                  "adults aged 25 and over who were not U.S. citizens at birth "
+                  "and whose highest attainment is a bachelor's, graduate or "
+                  "professional degree",
+                  "all foreign-born adults aged 25 and over in the place — "
+                  "adults who were not U.S. citizens at birth",
+                  "percent"),
+    MeasureOption("bachelors_plus_share_born_in_state",
+                  "Adults 25+ born in New York State with a bachelor's degree or higher",
+                  "adults aged 25 and over born in New York State whose highest "
+                  "attainment is a bachelor's, graduate or professional degree",
+                  "all adults aged 25 and over born in New York State", "percent"),
+    MeasureOption("bachelors_plus_share_born_other_state",
+                  "Adults 25+ born in another U.S. state with a bachelor's degree or higher",
+                  "adults aged 25 and over born in a different U.S. state whose "
+                  "highest attainment is a bachelor's, graduate or professional degree",
+                  "all adults aged 25 and over born in a different U.S. state",
+                  "percent"),
+    MeasureOption("black_alone_population",
+                  "Residents reporting Black or African American alone (number)",
+                  "residents reporting Black or African American alone", "",
+                  "persons"),
+    MeasureOption("black_alone_born_in_state_share",
+                  "Black residents born in New York State, share",
+                  "residents reporting Black or African American alone who were "
+                  "born in New York State, which is not the same as born in New "
+                  "York City",
+                  "all residents reporting Black or African American alone",
+                  "percent"),
+]
+
+#: Every measure the explorer can offer, in the order the sidebar groups them.
+#: `COMPARE_PLACES` carries the whole list because that question places no
+#: restriction on what is being compared; the other two stay narrower because
+#: their wording and their `not_answered` lines are written for their topic.
+_ALL_MEASURES = (_PROFILE_MEASURES + _EDUCATION_AND_RACE_MEASURES
+                 + _birthplace_options())
+
 QUESTION_MEASURES: dict[str, list[MeasureOption]] = {
     WHO_LIVES_HERE: _PROFILE_MEASURES,
-    COMPARE_PLACES: _PROFILE_MEASURES + _birthplace_options(),
+    COMPARE_PLACES: _ALL_MEASURES,
     BIRTHPLACE_CONCENTRATION: _birthplace_options(),
 }
+
+#: Said of any tract-level selection, whichever question frames the brief.
+#: These are properties of the geography, not of the question that happened to
+#: be asked, so they must not disappear when a tract map is framed as a
+#: comparison rather than as a birthplace concentration.
+TRACT_CAVEATS = [
+    "Census tracts are statistical areas, not neighbourhoods. This build has "
+    "no documented neighbourhood boundaries, so tracts are called tracts and "
+    "are identified by their published number.",
+    "Tract estimates carry large margins of error. Read the uncertainty "
+    "column before quoting a single tract.",
+]
+
+#: Group headings for the sidebar, keyed by the catalog's own `concept`. A
+#: measure whose concept is not listed keeps its concept as the heading.
+CONCEPT_GROUPS: dict[str, str] = {
+    "Population size": "Population",
+    "Nativity": "Born in the U.S. or abroad",
+    "Citizenship": "Citizenship",
+    "Place of birth of the foreign-born population":
+        "Birthplace of foreign-born residents",
+    "Educational attainment by place of birth": "Education by place of birth",
+    "Place of birth by race": "Race and place of birth",
+}
+
+#: The order those groups appear in, broadest first.
+CONCEPT_ORDER = [
+    "Population size",
+    "Nativity",
+    "Citizenship",
+    "Place of birth of the foreign-born population",
+    "Education by place of birth",
+    "Place of birth by race",
+]
+
+
+def base_limitations(question: Question, level: str) -> list[str]:
+    """What a brief must say it does not claim, for this question at this level.
+
+    The tract lines are properties of the geography rather than of the
+    question, so they are added whichever question frames a tract brief, and
+    never added twice.
+    """
+    out = list(question.not_answered)
+    if level == "tract":
+        for caveat in TRACT_CAVEATS:
+            if caveat not in out:
+                out.append(caveat)
+    return out
+
+
+def catalog(dataset: dict[str, Any], level: str) -> list[MeasureOption]:
+    """Every option the built dataset carries at `level`, in sidebar order.
+
+    Unlike `available()`, this is not scoped to one question: it is what the
+    explorer offers. It still never invents a measure — an option is dropped
+    unless the build records it as available at that exact level.
+    """
+    by_id = {m["measure_id"]: m for m in dataset.get("measures", [])}
+    out: list[MeasureOption] = []
+    seen: set[str] = set()
+    for option in _ALL_MEASURES:
+        if option.measure_id in seen:
+            continue
+        entry = by_id.get(option.measure_id)
+        if entry is None:
+            continue
+        if not entry.get("availability", {}).get(level, False):
+            continue
+        seen.add(option.measure_id)
+        out.append(option)
+    return out
+
+
+def question_for(measure_id: str, level: str, area_count: int) -> str:
+    """The question whose wording fits this selection and carries this measure.
+
+    A brief is always framed by one of the three questions, so the explorer
+    must resolve one for whatever the user selected. The resolved question is
+    guaranteed to list `measure_id`, which is what `brief_context` requires.
+    """
+    birthplace = {o.measure_id for o in _birthplace_options()}
+    profile = {o.measure_id for o in _PROFILE_MEASURES}
+    if level == "tract" and measure_id in birthplace:
+        return BIRTHPLACE_CONCENTRATION
+    if level == "county" and area_count == 1 and measure_id in profile:
+        return WHO_LIVES_HERE
+    if measure_id in {o.measure_id for o in _ALL_MEASURES}:
+        return COMPARE_PLACES
+    raise ValueError(f"no question offers the measure '{measure_id}'")
 
 
 def available(question_id: str, dataset: dict[str, Any]) -> list[MeasureOption]:
