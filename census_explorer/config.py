@@ -139,6 +139,10 @@ class ProjectConfig:
                 f"unknown release '{release_id}'; configured: {sorted(self.releases)}"
             ) from None
 
+    def composite(self, composite_id: str) -> dict | None:
+        """A named group of areas whose membership is documented, not inferred."""
+        return (self.raw.get("explorer", {}).get("composites") or {}).get(composite_id)
+
     def measures_for_release(self) -> list[MeasureDef]:
         return [self.measures[k] for k in sorted(self.measures)]
 

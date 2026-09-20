@@ -46,6 +46,10 @@ def stage_two_release_project(root: Path):
     project["explorer"]["comparison_release"] = "testrel2"
 
     measures = json.loads(json.dumps(MEASURES_JSON))
+    # This helper stages only B05002, so drop the measures that need another table.
+    measures["measures"] = [m for m in measures["measures"]
+                            if all(c.startswith("B05002")
+                                   for c in m["numerator_cells"] + m["denominator_cells"])]
     measures["measures"].append({
         "measure_id": "naturalized_share",
         "label": "Naturalized citizens, share of the foreign-born population",

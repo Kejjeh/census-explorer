@@ -588,9 +588,23 @@ function plainReason(v, which) {
   return lowered;
 }
 
+function isControlled(v) {
+  return (v.flags || []).some((f) => f.includes('controlled'));
+}
+
+function fmtMoe(value, unit) {
+  // A margin of error on a percentage is a span of percentage points; writing
+  // it as a percentage invites reading it as a share of the estimate.
+  if (value === null || value === undefined) return '—';
+  return unit === 'percent' ? `± ${value.toFixed(1)} points` : `± ${fmt(value, unit)}`;
+}
+
 function reliabilityWords(v, unit) {
   // Says something the margin-of-error column does not already say.
   if (v.es !== 'ok') return plainReason(v, 'e');
+  if (isControlled(v) && !v.m) {
+    return 'controlled to an independent population estimate, so it carries no sampling error';
+  }
   if (v.ms !== 'ok') return `margin of error unavailable: ${plainReason(v, 'm')}`;
   if (v.rel) return v.cv !== undefined && v.cv !== null
     ? `${v.rel} (CV ${v.cv.toFixed(0)}%)` : v.rel;
@@ -612,6 +626,7 @@ function rowsForTable() {
       name: area ? area.name : geoid,
       estimate: v.es === 'ok' ? v.e : null,
       moe: v.ms === 'ok' ? v.m : null,
+      controlled: isControlled(v) && !v.m,
       quality: reliabilityWords(v, o.unit),
     };
   });
@@ -652,7 +667,7 @@ function renderTable(o) {
 
   const body = $('table-body');
   body.textContent = '';
-  if (state.benchmark && state.benchmark.available) {
+  if (state.benchmark) {
     body.appendChild(benchmarkRow(o));
   }
   const rows = rowsForTable();
@@ -669,11 +684,13 @@ function renderTable(o) {
       const td = document.createElement('td');
       if (c.num) td.className = 'num';
       if (c.key === 'name' || c.key === 'quality') td.textContent = row[c.key];
+      else if (c.key === 'moe' && row.controlled) td.textContent = 'none';
       else if (row[c.key] === null) {
         td.classList.add('missing');
         td.textContent = c.key === 'estimate' ? 'no data' : '—';
       } else {
-        td.textContent = (c.key === 'moe' ? '± ' : '') + fmt(row[c.key], o.unit);
+        td.textContent = c.key === 'moe' ? fmtMoe(row[c.key], o.unit)
+          : fmt(row[c.key], o.unit);
       }
       tr2.appendChild(td);
     });
@@ -694,13 +711,25 @@ function benchmarkRow(o) {
   const b = state.benchmark;
   const tr = document.createElement('tr');
   tr.className = 'benchmark-row';
+  if (!b.available) {
+    // A reference that was asked for and could not be built is information.
+    [b.label, 'not available', '—', b.unavailable_reason || 'no reason recorded']
+      .forEach((text, i) => {
+        const td = document.createElement('td');
+        if (i === 1 || i === 2) td.className = 'num';
+        if (i === 1) td.classList.add('missing');
+        td.textContent = text;
+        tr.appendChild(td);
+      });
+    return tr;
+  }
   let moeText = '—';
   let note = 'reference value; margin of error unavailable';
   if (b.controlled) {
     moeText = 'none';
     note = 'reference value; controlled total, so no sampling error';
   } else if (b.moe_status === 'ok') {
-    moeText = '± ' + fmt(b.moe, o.unit);
+    moeText = fmtMoe(b.moe, o.unit);
     note = 'reference value';
   }
   [b.label, b.estimate === null ? 'no data' : fmt(b.estimate, o.unit), moeText, note]
@@ -761,7 +790,9 @@ function renderDrawer() {
     parts.push(`<dt>Estimate</dt><dd>${v.es === 'ok'
       ? esc(fmt(v.e, o.unit)) : `<span class="caveat">unavailable — ${esc(v.er || 'no reason recorded')}</span>`}</dd>`);
     parts.push(`<dt>Margin of error</dt><dd>${v.ms === 'ok'
-      ? `± ${esc(fmt(v.m, o.unit))} at 90% confidence`
+      ? (isControlled(v) && !v.m
+        ? 'none — controlled to an independent population estimate'
+        : `${esc(fmtMoe(v.m, o.unit))} at 90% confidence`)
       : `<span class="caveat">unavailable — ${esc(plainReason(v, 'm'))}. Missing uncertainty is unavailable, not zero.</span>`}</dd>`);
     if (v.cv !== undefined && v.cv !== null) {
       parts.push(`<dt>Relative error</dt><dd>${v.cv.toFixed(1)}% — ${esc(v.rel)}</dd>`);

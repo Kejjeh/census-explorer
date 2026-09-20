@@ -64,6 +64,33 @@ def fmt(value: float | None, unit: str) -> str:
     return f"{value:,.0f}"
 
 
+def _uncertainty_phrase(v: dict, unit: str) -> str:
+    """What to say about a value's uncertainty, in a tooltip.
+
+    A controlled estimate has no sampling error, and "plus or minus zero"
+    reads as a measurement of remarkable precision rather than as the absence
+    of one.
+    """
+    if v.get("controlled"):
+        return " (controlled total, no sampling error)"
+    if v.get("m") is None:
+        return ""
+    return " " + fmt_moe(v["m"], unit)
+
+
+def fmt_moe(value: float | None, unit: str) -> str:
+    """A margin of error on a percentage is a span of percentage points.
+
+    Writing it as a percentage invites reading it as a percentage *of the
+    estimate*, which is a different and much smaller number.
+    """
+    if value is None:
+        return "not available"
+    if unit == "percent":
+        return f"±{value:,.1f} percentage points"
+    return f"±{value:,.0f}"
+
+
 # ---------------------------------------------------------------------------
 # Choropleth
 # ---------------------------------------------------------------------------
@@ -395,10 +422,11 @@ def group_chart_svg(*, rows: list[dict], title: str, subtitle: str, unit: str,
                 f'height="{bar_h - 2:.1f}" fill="{colors[s % len(colors)]}" '
                 f'opacity="{1 if s == 0 else 0.85}"><title>'
                 f'{esc(r["label"])} - {esc(series_labels[s])}: {esc(fmt(v["e"], unit))}'
-                f'{esc(" ±" + fmt(v["m"], unit)) if v.get("m") is not None else ""}'
+                f'{esc(_uncertainty_phrase(v, unit))}'
                 f"</title></rect>"
             )
-            if v.get("m") is not None:
+            has_bar = v.get("m") is not None and not v.get("controlled")
+            if has_bar:
                 lo, hi = x_of(max(v["e"] - v["m"], 0)), x_of(v["e"] + v["m"])
                 cy = by + (bar_h - 2) / 2
                 body.append(
@@ -410,7 +438,7 @@ def group_chart_svg(*, rows: list[dict], title: str, subtitle: str, unit: str,
                     f'stroke="{INK}" stroke-width="1"/>'
                 )
             body.append(
-                f'<text x="{hi + 6 if v.get("m") is not None else x1 + 6:.1f}" '
+                f'<text x="{hi + 6 if has_bar else x1 + 6:.1f}" '
                 f'y="{by + bar_h / 2 + 3:.1f}" font-size="10" fill="{MUTED}">'
                 f"{esc(fmt(v['e'], unit))}</text>"
             )

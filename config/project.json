@@ -102,6 +102,21 @@
       "block_one_year_five_year_splice": true,
       "overlapping_periods_are_not_independent": true,
       "shared_cut_points": true
+    },
+    "composites": {
+      "nyc": {
+        "label": "New York City (all five boroughs)",
+        "level": "county",
+        "member_geoids": [
+          "36005",
+          "36047",
+          "36061",
+          "36081",
+          "36085"
+        ],
+        "definition": "New York City consists of exactly these five counties, which are coextensive with its five boroughs. A reference built from fewer than all five is not New York City and must not carry its name.",
+        "verification": "Summing these five county rows reproduces the separately published New York City place row (GEOID 3651000) exactly for every cell the reconcile command checks. See docs/RUNBOOK.md step 2."
+      }
     }
   }
 }

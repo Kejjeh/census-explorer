@@ -56,6 +56,8 @@ def fetch_reference(repo_root: Path, log=print) -> provenance.Manifest:
     manifest = new_manifest(None, "reference", "live", repo_root)
     path = reference.refresh(repo_root, manifest)
     log(f"  annotation reference rebuilt: {path}")
+    path = reference.refresh_definitions(repo_root, manifest)
+    log(f"  quoted definitions rebuilt: {path}")
     save_manifest(repo_root, manifest)
     return manifest
 

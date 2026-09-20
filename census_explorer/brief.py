@@ -114,6 +114,74 @@ def fmt(value: float | None, unit: str) -> str:
     return f"{value:,.0f}"
 
 
+def fmt_moe(value: float | None, unit: str) -> str:
+    """A margin of error on a percentage is a span of percentage points."""
+    if value is None:
+        return "—"
+    if unit == "percent":
+        return f"±{value:,.1f} points"
+    return f"±{value:,.0f}"
+
+
+def _benchmark_row(benchmark: dict, unit: str) -> str:
+    """One row for the reference, whether or not it could be built.
+
+    A reference the reader asked for and did not get is information. Dropping
+    it silently leaves them to assume it was never requested.
+    """
+    label = benchmark.get("label") or benchmark.get("benchmark_id") or "Reference"
+    if not benchmark.get("available"):
+        return ('<tr class="benchmark">'
+                f'<td>{e(label)}</td>'
+                '<td class="num missing">not available</td>'
+                '<td class="num">—</td>'
+                f'<td>{e(benchmark.get("unavailable_reason") or "no reason recorded")}'
+                "</td></tr>")
+
+    estimate = benchmark.get("estimate")
+    if benchmark.get("controlled"):
+        moe_cell = "none"
+        note = ("reference value; controlled to an independent population "
+                "estimate, so it carries no sampling error")
+    elif benchmark.get("moe_status") == "ok":
+        moe_cell = fmt_moe(benchmark.get("moe"), unit)
+        note = "reference value"
+    else:
+        moe_cell = "—"
+        note = "reference value; margin of error unavailable"
+
+    return ('<tr class="benchmark">'
+            f'<td>{e(label)}</td>'
+            + (f'<td class="num">{e(fmt(estimate, unit))}</td>' if estimate is not None
+               else '<td class="num missing">no data</td>')
+            + f'<td class="num">{e(moe_cell)}</td>'
+            + f"<td>{e(note)}</td></tr>")
+
+
+def _benchmark_note(benchmark: dict) -> str:
+    """How the reference was built, and why its uncertainty is what it is.
+
+    The brief has to stand on its own, so the basis travels with it rather
+    than living only in the interface that produced it.
+    """
+    label = benchmark.get("label") or "The reference"
+    parts = []
+    if benchmark.get("available") and benchmark.get("basis"):
+        parts.append(f"{label} is built from {benchmark['basis']}.")
+        count = benchmark.get("component_count")
+        if count:
+            parts.append(f"It combines {count} area(s).")
+    elif not benchmark.get("available"):
+        parts.append(f"{label} was requested but could not be built: "
+                     f"{benchmark.get('unavailable_reason') or 'no reason recorded'}")
+    if benchmark.get("moe_reason"):
+        parts.append(benchmark["moe_reason"])
+    if not parts:
+        return ""
+    return ('<p style="font-size:11.5px;color:#5d6166">'
+            + " ".join(e(p) for p in parts) + "</p>")
+
+
 def _quality_panels(context: dict[str, Any]) -> str:
     """Three separate statements. No combined score."""
     unc = context["uncertainty"]
@@ -155,21 +223,17 @@ def build(*, question: dict, summary: dict, rows: list[dict], measure: dict,
             cells.append(f'<td class="num missing">no data</td>')
         else:
             cells.append(f'<td class="num">{e(fmt(est, unit))}</td>')
-        cells.append(f'<td class="num">{e("±" + fmt(moe, unit)) if moe is not None else "—"}</td>')
+        if row.get("controlled"):
+            cells.append('<td class="num">none</td>')
+        else:
+            cells.append(f'<td class="num">{e(fmt_moe(moe, unit))}</td>')
         cells.append(f'<td>{e(row.get("quality", ""))}</td>')
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
 
-    if benchmark and benchmark.get("available"):
-        b_est = benchmark.get("estimate")
-        b_moe = benchmark.get("moe") if benchmark.get("moe_status") == "ok" else None
-        body_rows.append(
-            '<tr class="benchmark">'
-            f'<td>{e(benchmark["label"])}</td>'
-            + (f'<td class="num">{e(fmt(b_est, unit))}</td>' if b_est is not None
-               else '<td class="num missing">no data</td>')
-            + f'<td class="num">{e("±" + fmt(b_moe, unit)) if b_moe is not None else "—"}</td>'
-            + f'<td>{e("reference value" if b_moe is not None else "reference value; margin of error unavailable")}</td>'
-            '</tr>')
+    benchmark_note = ""
+    if benchmark:
+        body_rows.append(_benchmark_row(benchmark, unit))
+        benchmark_note = _benchmark_note(benchmark)
 
     meta_rows = "".join(
         f"<dt>{e(k)}</dt><dd>{e(v)}</dd>" for k, v in [
@@ -221,6 +285,7 @@ def build(*, question: dict, summary: dict, rows: list[dict], measure: dict,
 <th scope="col">Margin of error (90%)</th><th scope="col">Reliability</th></tr></thead>
 <tbody>{''.join(body_rows)}</tbody>
 </table>
+{benchmark_note}
 <p style="font-size:11.5px;color:#5d6166">An empty estimate means the value is
 unavailable, with the reason recorded in the exported data. It is never a zero.</p>
 

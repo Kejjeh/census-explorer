@@ -482,6 +482,7 @@ def build_figure_for(state: ServiceState, sel: selection_mod.Selection,
                 row_values.append({
                     "e": v.get("e") if v.get("es") == "ok" else None,
                     "m": v.get("m") if v.get("ms") == "ok" else None,
+                    "controlled": is_controlled_value(v) and not v.get("m"),
                     "note": plain_reason(v) if v.get("er") else "no usable estimate",
                 })
             rows.append({"label": sel.area_names.get(geoid, geoid), "values": row_values})
@@ -500,6 +501,11 @@ def build_figure_for(state: ServiceState, sel: selection_mod.Selection,
 # ---------------------------------------------------------------------------
 # Guided brief
 # ---------------------------------------------------------------------------
+
+def is_controlled_value(v: dict) -> bool:
+    """The stored value came from an estimate controlled to an independent total."""
+    return any("controlled" in flag for flag in (v.get("flags") or []))
+
 
 def plain_reason(v: dict, which: str = "e") -> str:
     """A reason a reader can act on, without the table cell code.
@@ -538,6 +544,9 @@ def _reliability_words(v: dict, unit: str) -> str:
     """
     if v.get("es") != "ok":
         return plain_reason(v, "e")
+    if is_controlled_value(v) and not v.get("m"):
+        return ("controlled to an independent population estimate, so it carries "
+                "no sampling error")
     if v.get("ms") != "ok":
         return f"margin of error unavailable: {plain_reason(v, 'm')}"
     if v.get("rel"):
@@ -696,11 +705,14 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
             "name": sel.area_names.get(geoid, geoid),
             "estimate": v.get("e") if v.get("es") == "ok" else None,
             "moe": v.get("m") if v.get("ms") == "ok" else None,
+            "controlled": is_controlled_value(v) and not v.get("m"),
             "quality": _reliability_words(v, measure.unit),
         })
 
     bench = None
     if benchmark_id and benchmark_id != benchmark_mod.NONE:
+        # Kept even when unavailable: a reader who asked for a reference must be
+        # told it could not be built, and why, rather than finding it missing.
         bench = build_benchmark(state, sel, benchmark_id).to_json()
 
     limitations = list(question.not_answered)
@@ -760,18 +772,34 @@ def build_benchmark(state: ServiceState, sel: selection_mod.Selection,
     counties = state.config.county_geoids
 
     if benchmark_id == benchmark_mod.NYC:
-        available_counties = [g for g in counties
-                              if g in state.areas_at(release.release_id, "county")]
-        if not available_counties:
+        composite = state.config.composite("nyc")
+        label = (composite or {}).get("label", "New York City (all five boroughs)")
+        if not composite:
             return benchmark_mod.unavailable(
-                benchmark_id, "New York City (all five boroughs)",
-                "borough-level values are not built for this release, so the city "
-                "total cannot be formed by adding them", measure.unit)
+                benchmark_id, label,
+                "no documented membership for this composite is recorded in "
+                "config/project.json, so it cannot be built", measure.unit)
+
+        members = [str(g) for g in composite["member_geoids"]]
+        # The configured project must still describe the place this reference is
+        # named after. A project narrowed to two boroughs may be perfectly
+        # valid work, but its totals are not New York City's.
+        if set(members) != set(counties):
+            return benchmark_mod.unavailable(
+                benchmark_id, label,
+                "the configured county set does not match the documented "
+                f"membership of {label}. Documented: {', '.join(sorted(members))}. "
+                f"Configured: {', '.join(sorted(counties)) or 'none'}. A reference "
+                "carrying this name is only built from the whole documented place.",
+                measure.unit)
+
+        built = state.areas_at(release.release_id, "county")
+        present = [g for g in members if g in built]
         return benchmark_mod.aggregate(
-            measure, county_values, available_counties, benchmark_id,
-            "New York City (all five boroughs)",
+            measure, county_values, present, benchmark_id, label,
             "the five boroughs' underlying counts added together, with the measure "
-            "recomputed from the totals")
+            "recomputed from the totals",
+            required_members=members)
 
     if benchmark_id == benchmark_mod.CONTAINING_BOROUGH:
         boroughs = sorted({g[:5] for g in sel.areas})

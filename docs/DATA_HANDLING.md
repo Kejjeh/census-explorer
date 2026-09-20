@@ -324,6 +324,74 @@ answers, and their `Origin` must be this service's own if one is present. A
 loopback `Host` header alone would not have stopped a cross-origin simple POST
 to localhost.
 
+## Named composites must be the whole place
+
+A reference called "New York City" has to be New York City. `config/project.json`
+records the composite's documented membership — the five county GEOIDs — and a
+benchmark carrying that name is built only when all five are present and usable.
+
+Three ways it refuses, rather than quietly rebasing on whatever is available:
+
+- a member area is not in the built dataset: the reference is unavailable and
+  names the missing boroughs;
+- a member has no usable value: the reference is unavailable and names it;
+- the configured county set no longer matches the documented membership: the
+  reference is unavailable and prints both sets.
+
+The last case matters because a project narrowed to two boroughs may be
+perfectly good work; its totals are simply not the city's. Summing one borough
+and labelling it "all five boroughs" is not a smaller New York City, it is a
+wrong number with an authoritative name on it.
+
+Arithmetic exactness is not accuracy. The sum of counts is exact as arithmetic,
+but every component is a sample-based estimate carrying its own sampling error,
+and the text says so wherever a combined figure is reported without a margin of
+error.
+
+## Foreign-born is a citizenship category, not a birthplace
+
+The Census Bureau's glossary, archived in
+`census_explorer/reference/census_definitions.json` with the source URL and the
+document's checksum:
+
+> The foreign-born population is composed of anyone who is not a U.S. citizen at
+> birth. This includes persons who have become U.S. citizens through
+> naturalization.
+
+> the native-born population, which comprises anyone who is a U.S. citizen at
+> birth, including people born in the United States, Puerto Rico, a U.S. Island
+> Area (...), or abroad to a U.S. citizen parent or parents.
+
+So "born outside the United States" names a different population: someone born
+abroad to a U.S. citizen parent, or in Puerto Rico, is native-born. B05002
+publishes exactly that category — "Native; born outside the United States" — so
+the distinction is visible in our own data.
+
+Every nativity measure is therefore labelled "foreign-born" and explained as
+"not a U.S. citizen at birth, including those who have since naturalised". The
+definitions are extracted from the archived glossary by pattern, and the
+extractor raises rather than guessing if the wording changes.
+
+## A percentage names its own denominator
+
+The unit of a share is its denominator. Describing every percentage as "percent
+of residents" is wrong for a share of the foreign-born, or of adults aged 25 and
+over, because those are different populations. The interface and the brief both
+take the unit from the measure's own universe.
+
+A margin of error on a percentage is a span of **percentage points**, not a
+percentage. Writing "±0.5%" invites reading it as half a percent *of the
+estimate*, which is a different and much smaller number, so it is written
+"±0.5 points".
+
+## Controlled totals say so
+
+An estimate controlled to an independent population total has no sampling error.
+Printing "±0" reads as a measurement of remarkable precision rather than the
+absence of one, so the table, the chart tooltip, the benchmark row and the brief
+all say "none" with the reason. This applies to individual areas as well as to
+combined references.
+
 ## Provenance
 
 Every retrieved artifact has a manifest record: provider, kind, sanitized

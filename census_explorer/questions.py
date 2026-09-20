@@ -72,10 +72,10 @@ QUESTIONS: dict[str, Question] = {
         place_mode="single",
         place_prompt="Which place?",
         measure_prompt="Lead with which measure?",
-        answers="How many people live in the place, what share were born outside "
-                "the United States, what share were born in this state or another "
-                "state, and what share of adults aged 25 and over hold a "
-                "bachelor's degree or higher.",
+        answers="How many people live in the place, what share are foreign-born, "
+                "what share were born in this state or another state, and what "
+                "share of adults aged 25 and over hold a bachelor's degree or "
+                "higher.",
         not_answered=[
             "It does not say when anyone arrived. Place of birth is a count of "
             "residents born somewhere, not a count of recent arrivals.",
@@ -83,6 +83,9 @@ QUESTIONS: dict[str, Question] = {
             "not in this build.",
             "'Born in New York State' is not 'born in New York City'. The published "
             "table records the state.",
+            "'Foreign-born' means not a U.S. citizen at birth, which is not the "
+            "same as born outside the United States: someone born abroad to a "
+            "U.S. citizen parent, or in Puerto Rico, is native-born.",
         ],
         benchmark_prompt="Compare against",
     ),
@@ -139,14 +142,26 @@ QUESTIONS: dict[str, Question] = {
 # that the built dataset does not actually carry at the question's level, so a
 # question never offers something that cannot be drawn.
 
+#: The Census Bureau's own wording, quoted rather than paraphrased. Someone
+#: born abroad to a U.S. citizen parent is native, so "born outside the United
+#: States" names a different population from "foreign born".
+FOREIGN_BORN_COUNTS = ("residents who were not U.S. citizens at birth, including "
+                       "those who have since naturalised")
+
 _PROFILE_MEASURES = [
     MeasureOption("total_population", "Total population",
                   "everyone living in the place", "", "persons"),
-    MeasureOption("foreign_born_share", "Share born outside the United States",
-                  "residents who were not U.S. citizens at birth",
+    MeasureOption("foreign_born_share", "Foreign-born share of residents",
+                  FOREIGN_BORN_COUNTS,
                   "all residents of the place", "percent"),
-    MeasureOption("foreign_born_population", "Number born outside the United States",
-                  "residents who were not U.S. citizens at birth", "", "persons"),
+    MeasureOption("foreign_born_population", "Foreign-born residents (number)",
+                  FOREIGN_BORN_COUNTS, "", "persons"),
+    MeasureOption("native_born_outside_us_share",
+                  "Native-born but born outside the United States, share of residents",
+                  "residents who were U.S. citizens at birth but were born outside "
+                  "the 50 states and D.C. — for example in Puerto Rico, or abroad "
+                  "to a U.S. citizen parent",
+                  "all residents of the place", "percent"),
     MeasureOption("born_in_state_of_residence_share",
                   "Share born in this state",
                   "residents born in the state they now live in",
@@ -156,8 +171,9 @@ _PROFILE_MEASURES = [
                   "residents born in a different U.S. state",
                   "all residents of the place", "percent"),
     MeasureOption("naturalized_share_of_foreign_born",
-                  "Share of foreign-born residents who have naturalised",
-                  "foreign-born residents who have become U.S. citizens",
+                  "Naturalised share of foreign-born residents",
+                  "foreign-born residents — people who were not U.S. citizens at "
+                  "birth — who have since become U.S. citizens by naturalisation",
                   "all foreign-born residents of the place", "percent"),
     MeasureOption("bachelors_plus_share_all",
                   "Share of adults 25+ with a bachelor's degree or higher",
@@ -165,9 +181,10 @@ _PROFILE_MEASURES = [
                   "bachelor's, graduate or professional degree",
                   "all adults aged 25 and over in the place", "percent"),
     MeasureOption("black_alone_foreign_born_share",
-                  "Share of Black residents born outside the United States",
+                  "Foreign-born share of Black residents",
                   "residents reporting Black or African American alone who were "
-                  "not U.S. citizens at birth",
+                  "not U.S. citizens at birth, including those who have since "
+                  "naturalised",
                   "all residents reporting Black or African American alone",
                   "percent"),
 ]
@@ -243,9 +260,14 @@ def describe(question_id: str, option: MeasureOption, period_label: str,
     counted = f"We are counting {option.counts_what}."
     if option.unit == "percent":
         out_of = f"Shown as a percentage of {option.out_of}."
+        # The unit is the denominator. Saying "percent of residents" for a
+        # share of the foreign-born, or of adults 25 and over, describes a
+        # quantity the measure does not compute.
+        unit = f"percent of {option.out_of}"
     else:
         out_of = ("Shown as a number of people, not a share, so it reflects how "
                   "large the place is as well as its composition.")
+        unit = "people (a count, not a share)"
     return {
         "question": question.title,
         "places": places,
@@ -253,7 +275,7 @@ def describe(question_id: str, option: MeasureOption, period_label: str,
         "measure": option.label,
         "counted": counted,
         "out_of": out_of,
-        "unit": "percent of residents" if option.unit == "percent" else "people",
+        "unit": unit,
     }
 
 

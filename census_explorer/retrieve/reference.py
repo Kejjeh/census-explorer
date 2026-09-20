@@ -22,6 +22,31 @@ ANNOTATION_DOC_URL = (
     "notes-on-acs-estimate-and-annotation-values.html"
 )
 
+NATIVITY_GLOSSARY_URL = (
+    "https://www.census.gov/topics/population/foreign-born/about/glossary.html"
+)
+
+#: Definitions we quote in the interface. Each is pulled from the provider's own
+#: glossary rather than paraphrased, because the difference between "foreign
+#: born" and "born outside the United States" is exactly the kind of paraphrase
+#: that turns a measure into a different measure.
+QUOTED_DEFINITIONS = {
+    "foreign_born": {
+        "url": NATIVITY_GLOSSARY_URL,
+        "anchor": "Foreign-born population",
+        # Anchored on the closing phrase: a full stop is no sentence boundary
+        # in text full of "U.S.".
+        "pattern": r"The foreign-born population is composed of.{0,200}?"
+                   r"through naturalization\.",
+    },
+    "native_born": {
+        "url": NATIVITY_GLOSSARY_URL,
+        "anchor": "native-born population",
+        "pattern": r"the native-born population, which comprises.{0,400}?"
+                   r"U\.S\. citizen parent or parents\.",
+    },
+}
+
 _SENTINEL_RE = re.compile(r"^-\d{9}$")
 
 
@@ -53,6 +78,58 @@ def parse_annotation_values(page_html: str) -> dict[str, dict[str, str]]:
             "the page layout changed and the extractor must be reviewed"
         )
     return values
+
+
+def _visible_text(page_html: str) -> str:
+    text = re.sub(r"<script.*?</script>", " ", page_html, flags=re.S | re.I)
+    text = re.sub(r"<style.*?</style>", " ", text, flags=re.S | re.I)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    return re.sub(r"\s+", " ", text)
+
+
+def refresh_definitions(repo_root: Path, manifest: provenance.Manifest) -> Path:
+    """Archive the provider glossary and extract the definitions we quote."""
+    resp = fetch(NATIVITY_GLOSSARY_URL)
+    cache_rel = Path("data/raw/reference/census_nativity_glossary.html")
+    cache_path = repo_root / cache_rel
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(resp.body)
+
+    record = provenance.RetrievalRecord(
+        artifact_id="reference:census_nativity_glossary",
+        provider="US Census Bureau",
+        kind="reference",
+        source_url=resp.url_sanitized,
+        request={"method": "GET"},
+        retrieved_at=provenance.utc_now(),
+        http_status=resp.status,
+        content_bytes=len(resp.body),
+        sha256=provenance.sha256_bytes(resp.body),
+        cache_path=str(cache_rel).replace("\\", "/"),
+        notes=["Provider glossary for nativity and citizenship-at-birth terms."],
+    )
+    manifest.add(record)
+
+    text = _visible_text(resp.body.decode("utf-8", errors="replace"))
+    out = {"schema_version": 1, "definitions": {}}
+    for key, spec in QUOTED_DEFINITIONS.items():
+        match = re.search(spec["pattern"], text)
+        if not match:
+            raise RedactedError(
+                f"could not extract the '{key}' definition from "
+                f"{spec['url']}; the glossary wording changed and the quoted "
+                "definition must be reviewed rather than guessed at")
+        out["definitions"][key] = {
+            "definition": match.group(0).strip(),
+            "source_url": spec["url"],
+            "retrieved_at": record.retrieved_at,
+            "document_sha256": record.sha256,
+        }
+    target = (Path(__file__).resolve().parent.parent / "reference"
+              / "census_definitions.json")
+    target.write_text(json.dumps(out, indent=2, sort_keys=True) + "\n",
+                      encoding="utf-8")
+    return target
 
 
 def refresh(repo_root: Path, manifest: provenance.Manifest) -> Path:

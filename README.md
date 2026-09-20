@@ -21,7 +21,7 @@ no telemetry, and the local service holds no credentials.
 | --- | --- |
 | Three guided questions mapped to validated measures | Working |
 | Plain-language selection summary: what is counted, out of what | Working |
-| Compatible benchmark built by adding underlying counts | Working |
+| Compatible benchmark built by adding underlying counts | Working; a named composite is refused unless its whole documented membership is present |
 | Quality as three separate statements, no combined score | Working |
 | Print-ready brief from the same validated selection | Working |
 | ACS retrieval for the five boroughs and all NYC census tracts | Working, 2019-2023 and 2018-2022 ACS five-year |
@@ -34,7 +34,7 @@ no telemetry, and the local service holds no credentials.
 | Comparing places within one period | Working; needs no boundary equivalence |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 210 tests, no network |
+| Offline test suite | Working: 237 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
@@ -158,7 +158,7 @@ start-up.
 ## Verify the build
 
 ```powershell
-python -m unittest discover -s tests -t .          # 210 offline tests
+python -m unittest discover -s tests -t .          # 237 offline tests
 python -m census_explorer.cli verify manifests     # re-hash the raw cache
 python -m census_explorer.cli verify catalog       # cells vs the published release
 python -m census_explorer.cli reconcile --release acs5_2023

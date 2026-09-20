@@ -123,7 +123,10 @@ class BenchmarkTests(unittest.TestCase):
                         "m": 1.0, "ms": "ok"}}
         bench = benchmark_mod.aggregate(self.SHARE, values, ["a"], "x", "x", "b")
         self.assertEqual(bench.moe_status, "unavailable")
-        self.assertIn("uncertainty is unavailable", bench.moe_reason)
+        self.assertIn("sampling error", bench.moe_reason)
+        self.assertIn("not quantified", bench.moe_reason)
+        # The sum is arithmetically exact; that is not the same as accurate.
+        self.assertIn("arithmetically exact", bench.moe_reason)
 
     def test_a_count_benchmark_combines_margins_of_error(self):
         values = {"a": {"e": 100, "es": "ok", "m": 30, "ms": "ok"},
@@ -243,10 +246,26 @@ class BriefTests(unittest.TestCase):
         self.assertIn("does not keep a copy of the data", html)
 
     def test_the_benchmark_appears_with_its_basis(self):
+        # The fixture leaves two boroughs unusable on purpose, so give the
+        # complete city a value before asking for the complete city.
+        values = self.state.values("testrel", "foreign_born_share")
+        for geoid in self.state.config.county_geoids:
+            values[geoid] = {"e": 30.0, "es": "ok", "n": 300, "d": 1000,
+                             "m": 1.0, "ms": "ok"}
         context = server.brief_context(self.state, self.sel,
                                        questions.WHO_LIVES_HERE, benchmark_mod.NYC)
-        self.assertTrue(context["benchmark"]["available"])
+        self.assertTrue(context["benchmark"]["available"],
+                        context["benchmark"]["unavailable_reason"])
         self.assertIn("added together", context["benchmark"]["basis"])
+
+    def test_an_incomplete_city_benchmark_is_reported_not_silently_rebased(self):
+        """The fixture cannot form the whole city, so it must say so."""
+        context = server.brief_context(self.state, self.sel,
+                                       questions.WHO_LIVES_HERE, benchmark_mod.NYC)
+        bench = context["benchmark"]
+        self.assertFalse(bench["available"])
+        self.assertIn("New York City", bench["label"])
+        self.assertIsNone(bench["estimate"])
 
     def test_a_measure_outside_the_question_is_refused(self):
         sel = server.build_selection(self.state, {

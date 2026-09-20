@@ -29,8 +29,17 @@ PROJECT_JSON = {
     "schema_version": 1, "name": "test", "status": "test", "execution_mode": "local",
     "first_project": {"id": "t", "modern_state_fips": "36", "modern_counties": COUNTIES},
     "explorer": {
-        "default_release": "testrel", "comparison_release": "", 
+        "default_release": "testrel", "comparison_release": "",
         "geography_levels": ["county"],
+        "composites": {
+            "nyc": {
+                "label": "New York City (all five boroughs)",
+                "level": "county",
+                "member_geoids": ["36005", "36047", "36061", "36081", "36085"],
+                "definition": "Exactly these five counties.",
+                "verification": "fixture",
+            },
+        },
         "releases": {
             "testrel": {
                 "provider": "US Census Bureau", "dataset": "acs/acs5", "vintage": 2023,
@@ -61,6 +70,32 @@ MEASURES_JSON = {
          "universe_note": "Total population (B05002).",
          "definition_note": "Foreign-born residents as a percentage of all residents.",
          "caveats": ["NY-born is not NYC-born."], "topics": ["nativity"]},
+        # A subgroup denominator: the universe is the foreign-born, not residents.
+        {"measure_id": "naturalized_share_of_foreign_born",
+         "label": "Naturalised share of foreign-born residents",
+         "concept": "Citizenship", "unit": "percent", "kind": "share",
+         "numerator_cells": ["B05002_014"], "denominator_cells": ["B05002_013"],
+         "universe_note": "Foreign-born population (B05002).",
+         "definition_note": "Foreign-born residents who have since naturalised.",
+         "caveats": [], "topics": ["citizenship"]},
+        # A third universe: adults aged 25 and over.
+        {"measure_id": "bachelors_plus_share_all",
+         "label": "Bachelor's degree or higher, share of all adults 25 and over",
+         "concept": "Educational attainment by place of birth",
+         "unit": "percent", "kind": "share",
+         "numerator_cells": ["B06009_005", "B06009_006"],
+         "denominator_cells": ["B06009_001"],
+         "universe_note": "Population 25 years and over in the United States (B06009).",
+         "definition_note": "Share of adults 25 and over holding a degree.",
+         "caveats": ["The universe is adults 25 and over, not all residents."],
+         "topics": ["education"]},
+        {"measure_id": "adults_25_plus_population",
+         "label": "Population 25 years and over", "concept": "Educational attainment",
+         "unit": "persons", "kind": "count",
+         "numerator_cells": ["B06009_001"], "denominator_cells": [],
+         "universe_note": "Population 25 years and over in the United States (B06009).",
+         "definition_note": "Residents aged 25 and over.",
+         "caveats": [], "topics": ["education", "population"]},
     ],
 }
 
@@ -74,11 +109,11 @@ def stage_project(root: Path) -> config_mod.ProjectConfig:
 
     meta_dir = root / "data/raw/metadata/testrel/groups"
     meta_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(FIXTURES / "metadata" / "B05002.json", meta_dir / "B05002.json")
-
     obs_dir = root / "data/raw/acs/testrel/summary_file"
     obs_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(FIXTURES / "summary_file" / "B05002.psv", obs_dir / "B05002.psv")
+    for table in ("B05002", "B06009"):
+        shutil.copy(FIXTURES / "metadata" / f"{table}.json", meta_dir / f"{table}.json")
+        shutil.copy(FIXTURES / "summary_file" / f"{table}.psv", obs_dir / f"{table}.psv")
 
     geo_dir = root / "data/raw/geo/GENZ2023"
     geo_dir.mkdir(parents=True, exist_ok=True)
