@@ -15,6 +15,7 @@ from typing import Any, Iterable
 # A restrained sequential ramp (light to dark), plus a distinct hatch colour for
 # areas with no usable value.  Chosen for adequate contrast on white.
 SEQUENTIAL = ["#e8eef4", "#bcd0e2", "#89aecb", "#5386ad", "#27618e"]
+WARN = "#7a3b12"
 NO_DATA_FILL = "#f4f1ec"
 NO_DATA_STROKE = "#b9b2a6"
 INK = "#1d1f21"
@@ -66,6 +67,13 @@ def fmt(value: float | None, unit: str) -> str:
 # ---------------------------------------------------------------------------
 # Choropleth
 # ---------------------------------------------------------------------------
+
+def _restrict(features: list[dict], areas: list[str] | None) -> list[dict]:
+    if areas is None:
+        return features
+    keep = set(areas)
+    return [f for f in features if f.get("properties", {}).get("GEOID") in keep]
+
 
 def _bounds(features: list[dict]) -> tuple[float, float, float, float]:
     xs: list[float] = []
@@ -129,7 +137,16 @@ def _path_for(geometry: dict, project) -> str:
 def choropleth_svg(*, features: list[dict], values: dict[str, dict],
                    title: str, subtitle: str, unit: str, cuts: list[float],
                    source_lines: list[str], width: int = 760, height: int = 620,
-                   data_mode: str = "live", panel_label: str | None = None) -> str:
+                   data_mode: str = "live", panel_label: str | None = None,
+                   areas: list[str] | None = None,
+                   disclosures: list[str] | None = None) -> str:
+    """One choropleth panel.
+
+    ``areas`` restricts the drawing to exactly the selected areas, so a figure
+    cannot show ground the accompanying data does not cover.
+    """
+    features = _restrict(features, areas)
+    disclosures = disclosures or []
     project = _projector(_bounds(features), width, height - 150, pad=16)
     body: list[str] = []
     n_missing = 0
@@ -175,7 +192,11 @@ def choropleth_svg(*, features: list[dict], values: dict[str, dict],
     )
 
     footer = []
-    y = height - 66
+    y = height - 66 - 13 * len(disclosures)
+    for line in disclosures:
+        footer.append(
+            f'<text x="16" y="{y}" font-size="10" fill="{WARN}">{esc("! " + line)}</text>')
+        y += 13
     for line in source_lines:
         footer.append(f'<text x="16" y="{y}" font-size="10" fill="{MUTED}">{esc(line)}</text>')
         y += 13
@@ -204,6 +225,104 @@ role="img" aria-label="{esc(title)}. {esc(subtitle)}">
 </svg>"""
 
 
+def choropleth_comparison_svg(*, panels: list[dict], title: str, subtitle: str,
+                              unit: str, cuts: list[float],
+                              source_lines: list[str], areas: list[str] | None = None,
+                              disclosures: list[str] | None = None,
+                              width: int = 1120, height: int = 600,
+                              data_mode: str = "live") -> str:
+    """Both periods of a comparison, side by side on one set of class breaks.
+
+    A comparison export that showed only one panel would not be the comparison
+    the interface displayed, so this draws both or the caller labels the figure
+    as a single period.
+    """
+    disclosures = disclosures or []
+    panel_width = (width - 48) // 2
+    map_height = height - 190
+
+    # One projection for both panels, so the two maps are directly comparable.
+    all_features = []
+    for panel in panels:
+        all_features.extend(_restrict(panel["features"], areas))
+    project = _projector(_bounds(all_features), panel_width, map_height, pad=14)
+
+    groups = []
+    n_missing = 0
+    for index, panel in enumerate(panels):
+        body = []
+        for f in _restrict(panel["features"], areas):
+            geoid = f["properties"]["GEOID"]
+            v = panel["values"].get(geoid) or {}
+            est = v.get("e") if v.get("es") == "ok" else None
+            cls = class_of(est, cuts)
+            if cls is None:
+                n_missing += 1
+                fill, stroke, extra = NO_DATA_FILL, NO_DATA_STROKE, ' stroke-dasharray="2 2"'
+            else:
+                fill, stroke, extra = SEQUENTIAL[min(cls, len(SEQUENTIAL) - 1)], "#ffffff", ""
+            body.append(
+                f'<path d="{_path_for(f["geometry"], project)}" fill="{fill}" '
+                f'stroke="{stroke}" stroke-width="0.6"{extra}>'
+                f'<title>{esc(f["properties"].get("name", geoid))}: '
+                f'{esc(fmt(est, unit))}</title></path>')
+        x = 16 + index * (panel_width + 16)
+        groups.append(
+            f'<g transform="translate({x},0)">'
+            f'<text x="0" y="-8" font-size="12" fill="{INK}">{esc(panel["label"])}</text>'
+            f'{"".join(body)}</g>')
+
+    legend_y = height - 128
+    legend = []
+    swatch_w = 44
+    for i in range(len(cuts) + 1):
+        x = 16 + i * (swatch_w + 4)
+        legend.append(
+            f'<rect x="{x}" y="{legend_y}" width="{swatch_w}" height="12" '
+            f'fill="{SEQUENTIAL[min(i, len(SEQUENTIAL) - 1)]}" stroke="#ffffff"/>')
+        if i < len(cuts):
+            legend.append(
+                f'<text x="{x + swatch_w + 2}" y="{legend_y + 26}" text-anchor="middle" '
+                f'font-size="10" fill="{MUTED}">{esc(fmt(cuts[i], unit))}</text>')
+    nd_x = 16 + (len(cuts) + 1) * (swatch_w + 4) + 16
+    legend.append(
+        f'<rect x="{nd_x}" y="{legend_y}" width="{swatch_w}" height="12" '
+        f'fill="{NO_DATA_FILL}" stroke="{NO_DATA_STROKE}" stroke-dasharray="2 2"/>'
+        f'<text x="{nd_x + swatch_w + 6}" y="{legend_y + 10}" font-size="10" '
+        f'fill="{MUTED}">no usable estimate ({n_missing})</text>'
+        f'<text x="{nd_x + swatch_w + 160}" y="{legend_y + 10}" font-size="10" '
+        f'fill="{MUTED}">both panels share these breaks</text>')
+
+    y = height - 76
+    footer = []
+    for line in disclosures:
+        footer.append(
+            f'<text x="16" y="{y}" font-size="10" fill="{WARN}">{esc("! " + line)}</text>')
+        y += 13
+    for line in source_lines:
+        footer.append(f'<text x="16" y="{y}" font-size="10" fill="{MUTED}">{esc(line)}</text>')
+        y += 13
+
+    banner = ""
+    if data_mode == "fixture":
+        banner = (f'<rect x="0" y="0" width="{width}" height="22" fill="{WARN}"/>'
+                  f'<text x="10" y="15" font-size="11" fill="#ffffff" font-weight="600">'
+                  f"FIXTURE MODE - synthetic test values, not census estimates</text>")
+    top = 22 if banner else 0
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" \
+viewBox="0 0 {width} {height}" font-family="Iowan Old Style, Palatino, Georgia, serif" \
+role="img" aria-label="{esc(title)}. {esc(subtitle)}">
+<rect width="{width}" height="{height}" fill="#ffffff"/>{banner}
+<text x="16" y="{top + 26}" font-size="17" fill="{INK}">{esc(title)}</text>
+<text x="16" y="{top + 45}" font-size="12" fill="{MUTED}">{esc(subtitle)}</text>
+<g transform="translate(0,{top + 70})">{''.join(groups)}</g>
+<line x1="16" y1="{legend_y - 14}" x2="{width - 16}" y2="{legend_y - 14}" stroke="{RULE}"/>
+{''.join(legend)}
+{''.join(footer)}
+</svg>"""
+
+
 # ---------------------------------------------------------------------------
 # Shared-scale group chart
 # ---------------------------------------------------------------------------
@@ -211,14 +330,17 @@ role="img" aria-label="{esc(title)}. {esc(subtitle)}">
 def group_chart_svg(*, rows: list[dict], title: str, subtitle: str, unit: str,
                     source_lines: list[str], series_labels: list[str],
                     width: int = 760, data_mode: str = "live",
-                    disclosures: list[str] | None = None) -> str:
+                    disclosures: list[str] | None = None,
+                    scope_note: str = "") -> str:
     """One row per group on a single shared scale.
 
     ``rows`` is ``[{"label": str, "values": [{"e": float|None, "m": float|None,
     "note": str}, ...]}]`` with one entry per series, in ``series_labels`` order.
     Missing values are drawn as an explicit gap marker, never as a zero bar.
     """
-    disclosures = disclosures or []
+    disclosures = list(disclosures or [])
+    if scope_note:
+        disclosures = [scope_note] + disclosures
     label_w = 230
     row_h = 26 if len(series_labels) == 1 else 34
     top = (22 if data_mode == "fixture" else 0) + 68
@@ -308,7 +430,7 @@ def group_chart_svg(*, rows: list[dict], title: str, subtitle: str, unit: str,
     footer = []
     for line in disclosures:
         footer.append(
-            f'<text x="16" y="{y}" font-size="10" fill="#7a3b12">{esc("! " + line)}</text>'
+            f'<text x="16" y="{y}" font-size="10" fill="{WARN}">{esc("! " + line)}</text>'
         )
         y += 13
     for line in source_lines:
@@ -318,7 +440,7 @@ def group_chart_svg(*, rows: list[dict], title: str, subtitle: str, unit: str,
     banner = ""
     if data_mode == "fixture":
         banner = (
-            f'<rect x="0" y="0" width="{width}" height="22" fill="#7a3b12"/>'
+            f'<rect x="0" y="0" width="{width}" height="22" fill="{WARN}"/>'
             f'<text x="10" y="15" font-size="11" fill="#ffffff" font-weight="600">'
             f"FIXTURE MODE - synthetic test values, not census estimates</text>"
         )

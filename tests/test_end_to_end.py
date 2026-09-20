@@ -252,26 +252,70 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("stroke-dasharray", svg)
         self.assertIn("margin of error", svg)
 
-    def test_project_saves_pins_a_manifest_and_replays(self):
+    def test_project_pins_its_inputs_and_replays_exactly(self):
         saved = self.post("/api/projects", {
             "project_id": "replay-test", "release_id": "testrel", "level": "county",
             "measure_id": "foreign_born_share", "title": "Replay"})
         self.assertEqual(saved["saved"], "replay-test")
+        self.assertGreater(saved["pinned_inputs"], 0,
+                           "a saved project must pin the files it was built from")
 
         listing = self.get("/api/projects")["projects"]
         self.assertEqual(listing[0]["project_id"], "replay-test")
+        self.assertGreater(listing[0]["pinned_input_count"], 0)
 
-        reopened = self.get("/api/project?id=replay-test")
-        self.assertEqual(reopened["measure_id"], "foreign_born_share")
-        self.assertEqual(reopened["manifest_ids"], ["fixture-manifest"])
-        self.assertEqual(reopened["requested"]["release_id"], "testrel")
+        replay = self.get("/api/project?id=replay-test")
+        self.assertTrue(replay["pin"]["verified"])
+        self.assertEqual(replay["project"]["measure_id"], "foreign_born_share")
+        self.assertEqual(replay["project"]["requested"]["release_id"], "testrel")
+        self.assertEqual(replay["selection"]["measure_ids"], ["foreign_born_share"])
 
-        # Replaying the saved definition must reproduce the same numbers.
+        # Replaying must reproduce the same numbers, from the pinned inputs.
         before = self.get("/api/values?release=testrel&measure=foreign_born_share")["values"]
-        again = self.get(
-            f"/api/values?release={reopened['release_id']}"
-            f"&measure={reopened['measure_id']}")["values"]
-        self.assertEqual(before, again)
+        for geoid, value in replay["values"]["testrel"]["foreign_born_share"].items():
+            self.assertEqual(value, before[geoid])
+
+    def test_reopening_a_project_whose_inputs_changed_is_refused(self):
+        self.post("/api/projects", {
+            "project_id": "pinned", "release_id": "testrel", "level": "county",
+            "measure_id": "foreign_born_share", "title": "Pinned"})
+        path = self.root / "data/processed/testrel/values/foreign_born_share.json"
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc["values"]["36005"]["e"] = 99.0
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        try:
+            self.get("/api/project?id=pinned")
+            self.fail("expected the replay to be refused")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 409)
+            body = json.loads(exc.read())
+            self.assertEqual(body["kind"], "pin_mismatch")
+            self.assertIn("changed since the project was saved", body["error"])
+
+    def test_a_cross_origin_post_is_refused(self):
+        url = f"http://127.0.0.1:{self.port}/api/projects"
+        req = urllib.request.Request(
+            url, data=b"{}",
+            headers={"Content-Type": "application/json",
+                     "Host": f"127.0.0.1:{self.port}",
+                     "Origin": "http://evil.example"})
+        try:
+            urllib.request.urlopen(req, timeout=10)
+            self.fail("expected a refusal")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 403)
+
+    def test_a_form_content_type_post_is_refused(self):
+        url = f"http://127.0.0.1:{self.port}/api/export"
+        req = urllib.request.Request(
+            url, data=b"release_id=testrel",
+            headers={"Content-Type": "application/x-www-form-urlencoded",
+                     "Host": f"127.0.0.1:{self.port}"})
+        try:
+            urllib.request.urlopen(req, timeout=10)
+            self.fail("expected a refusal")
+        except urllib.error.HTTPError as exc:
+            self.assertEqual(exc.code, 415)
 
     def test_export_bundle_has_data_provenance_figure_and_readme(self):
         result = self.post("/api/export", {
@@ -294,6 +338,8 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(prov["releases"][0]["period_label"], "2019-2023 ACS")
         self.assertTrue(prov["measures"][0]["universe_note"])
         self.assertIn("never a zero", prov["reading_the_columns"]["estimate"])
+        self.assertTrue(prov["inputs"], "the bundle must name the files it used")
+        self.assertEqual(prov["selection"]["level"], "county")
 
     def test_export_unavailable_value_is_blank_with_a_reason(self):
         result = self.post("/api/export", {

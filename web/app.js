@@ -37,7 +37,12 @@ const $ = (id) => document.getElementById(id);
 async function api(path) {
   const res = await fetch(path, { headers: { Accept: 'application/json' } });
   const body = await res.json().catch(() => ({ error: 'response was not JSON' }));
-  if (!res.ok) throw new Error(body.error || `request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(body.error || `request failed (${res.status})`);
+    err.kind = body.kind;
+    err.status = res.status;
+    throw err;
+  }
   return body;
 }
 
@@ -50,6 +55,14 @@ async function post(path, payload) {
   const body = await res.json().catch(() => ({ error: 'response was not JSON' }));
   if (!res.ok) throw new Error(body.error || `request failed (${res.status})`);
   return body;
+}
+
+function showBlock(title, message) {
+  const el = $('compat');
+  el.hidden = false;
+  el.className = 'compat blocked';
+  el.innerHTML = `<div><strong>${escapeHtml(title)}</strong></div>` +
+    `<ul><li>${escapeHtml(message).replace(/\n/g, '<br>')}</li></ul>`;
 }
 
 function toast(message, ms = 4200) {
@@ -241,7 +254,19 @@ function renderCatalog() {
 /* ------------------------------------------------------------ rendering */
 
 function areasAtLevel(dataset) {
-  return dataset.areas.filter((a) => a.level === state.level);
+  const areas = dataset.areas.filter((a) => a.level === state.level);
+  // When a comparison is on, the view shows exactly the areas the comparison
+  // is allowed to use. The disclosure says non-shared areas are excluded, so
+  // they are excluded here too, not only in the sentence.
+  if (state.compat && state.compat.allowed) {
+    const allowed = new Set(state.compat.comparable_geoids || []);
+    return areas.filter((a) => allowed.has(a.geoid));
+  }
+  return areas;
+}
+
+function selectedGeoids() {
+  return areasAtLevel(state.dataset).map((a) => a.geoid);
 }
 
 function usableValues(values) {
@@ -294,13 +319,21 @@ function render() {
     (state.compareId && state.compat?.allowed ? `&compare=${encodeURIComponent(state.compareId)}` : '');
 
   renderCompat();
-  drawMap($('map'), state.geo, state.values, m);
+  const visible = new Set(selectedGeoids());
+  const geo = state.geo && {
+    ...state.geo,
+    features: state.geo.features.filter((f) => visible.has(f.properties.GEOID)),
+  };
+  drawMap($('map'), geo, state.values, m);
   const wrapB = $('map-b-wrap');
   if (state.compareId && state.compat?.allowed) {
     wrapB.hidden = false;
     $('map-b-caption').textContent =
       `${m.label} — ${state.datasetB.release.period_label} (same class breaks)`;
-    drawMap($('map-b'), state.geoB, state.valuesB, m);
+    drawMap($('map-b'), state.geoB && {
+      ...state.geoB,
+      features: state.geoB.features.filter((f) => visible.has(f.properties.GEOID)),
+    }, state.valuesB, m);
   } else {
     wrapB.hidden = true;
   }
@@ -312,21 +345,28 @@ function render() {
 function renderCompat() {
   const el = $('compat');
   if (!state.compat) { el.hidden = true; return; }
+  const c = state.compat;
   el.hidden = false;
-  el.className = 'compat' + (state.compat.allowed ? '' : ' blocked');
+  el.className = 'compat' + (c.allowed ? '' : ' blocked');
   const items = [];
-  if (!state.compat.allowed) {
-    items.push('<strong>This comparison is blocked.</strong>');
-    state.compat.blocking.forEach((b) => items.push(escapeHtml(b)));
+  if (!c.allowed) {
+    items.push('<strong>This comparison is blocked, so only ' +
+      `${escapeHtml(state.dataset.release.period_label)} is shown.</strong>`);
+    c.blocking.forEach((b) => items.push(escapeHtml(b)));
+    items.push('Try the borough level, or turn the comparison off, or record a ' +
+      'reviewed equivalence in <code>config/geography_equivalence.json</code>.');
   }
-  state.compat.disclosures.forEach((d) => items.push(escapeHtml(d)));
-  if (state.compat.allowed && state.compat.shared_cut_points?.length) {
+  c.disclosures.forEach((d) => items.push(escapeHtml(d)));
+  if (c.allowed && c.shared_cut_points?.length) {
     items.push('Both maps use one shared set of class breaks, computed over the pooled ' +
       'values of both periods.');
   }
-  el.innerHTML = `<div>Comparison check: ${state.compat.release_a} vs ` +
-    `${state.compat.release_b} (${state.compat.shared_geoids} shared areas)</div>` +
-    `<ul><li>${items.join('</li><li>')}</li></ul>`;
+  const ev = c.geography_evidence;
+  const head = `Comparison check: ${escapeHtml(c.release_a)} vs ${escapeHtml(c.release_b)} — ` +
+    `${c.shared_geoids} shared identifiers, ` +
+    `${c.comparable_geoid_count} comparable` +
+    (ev ? `, geography evidence: ${escapeHtml(ev.kind)} (${ev.established ? 'established' : 'not established'})` : '');
+  el.innerHTML = `<div>${head}</div><ul><li>${items.join('</li><li>')}</li></ul>`;
 }
 
 function projectPath(geometry, project) {
@@ -668,7 +708,8 @@ async function saveProject(event) {
       areas: [],
       classes: 5,
     });
-    toast(`Saved ${res.saved} to ${res.path}`);
+    toast(`Saved ${res.saved} to ${res.path}, pinning ${res.pinned_inputs} input ` +
+      'file(s). Reopening it will refuse rather than show different numbers.', 7000);
     $('project-id').value = '';
     renderProjects();
   } catch (e) { toast(`Could not save: ${e.message}`); }
@@ -690,7 +731,20 @@ async function renderProjects() {
     open.className = 'button ghost';
     open.textContent = p.project_id;
     open.addEventListener('click', async () => {
-      const full = await api(`/api/project?id=${encodeURIComponent(p.project_id)}`);
+      let replay;
+      try {
+        replay = await api(`/api/project?id=${encodeURIComponent(p.project_id)}`);
+      } catch (e) {
+        if (e.kind === 'pin_mismatch') {
+          showBlock(`Cannot reopen ${p.project_id}`, e.message);
+          toast(`${p.project_id} was not reopened: its inputs changed since it was saved.`,
+                9000);
+        } else {
+          toast(`Could not reopen ${p.project_id}: ${e.message}`);
+        }
+        return;
+      }
+      const full = replay.project;
       state.releaseId = full.release_id;
       state.compareId = full.comparison_release_id || '';
       state.level = full.level;
@@ -699,9 +753,9 @@ async function renderProjects() {
       $('compare-select').value = state.compareId;
       $('level-select').value = state.level;
       await loadRelease();
-      const pinned = full.manifest_ids?.length || 0;
-      toast(`Reopened ${p.project_id} — pinned to ${pinned} data manifest${pinned === 1 ? '' : 's'}, `
-        + `so refreshing the cache will not change this figure.`);
+      const n = replay.pin?.input_count ?? 0;
+      toast(`Reopened ${p.project_id}. All ${n} pinned input${n === 1 ? '' : 's'} were ` +
+        'present and unchanged, so this is the result the project was saved from.', 7000);
     });
     const del = document.createElement('button');
     del.type = 'button';
@@ -718,15 +772,20 @@ async function renderProjects() {
 
 async function doExport() {
   try {
+    const comparing = Boolean(state.compareId && state.compat?.allowed);
     const res = await post('/api/export', {
       release_id: state.releaseId,
-      comparison_release_id: state.compareId || null,
+      comparison_release_id: comparing ? state.compareId : null,
       measure_id: state.measureId,
       level: state.level,
+      // The exported figure covers exactly the areas on screen.
+      areas: selectedGeoids(),
       figure_kind: 'map',
       include_figure: true,
     });
-    toast(`Exported ${res.rows} rows to ${res.export_dir} (data.csv, provenance.json, figure.svg)`);
+    const n = res.selection?.area_count ?? '?';
+    toast(`Exported ${res.rows} rows over ${n} ${state.level} areas to ${res.export_dir} ` +
+      '(data.csv, provenance.json, figure.svg). The figure covers the same areas.');
   } catch (e) { toast(`Export failed: ${e.message}`); }
 }
 

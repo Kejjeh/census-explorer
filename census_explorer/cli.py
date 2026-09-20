@@ -21,7 +21,7 @@ from pathlib import Path
 from . import (compare as compare_mod, config as config_mod, dataset as dataset_mod,
                fixtures as fixtures_mod, http_client, metadata as metadata_mod,
                pipeline, projects as projects_mod, provenance, reconcile as reconcile_mod,
-               server as server_mod)
+               server as server_mod, snapshot as snapshot_mod)
 from .redact import redact
 from .retrieve import acs_api
 
@@ -92,7 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_.add_argument("--a", required=True)
     cmp_.add_argument("--b", required=True)
     cmp_.add_argument("--level", choices=LEVELS, default="county")
-    cmp_.add_argument("--measure", default=None)
+    cmp_.add_argument("--measure", required=True,
+                      help="required: semantic compatibility cannot be established "
+                           "without naming a measure")
 
     # fixtures ------------------------------------------------------------
     fx = sub.add_parser("fixtures", help="build the offline fixture dataset (synthetic)")
@@ -101,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # projects ------------------------------------------------------------
     pr = sub.add_parser("project", help="saved project definitions")
-    pr.add_argument("action", choices=("list", "show", "delete"))
+    pr.add_argument("action", choices=("list", "show", "verify", "delete"))
     pr.add_argument("--id", default=None)
 
     # export --------------------------------------------------------------
@@ -111,6 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--measure", default=None)
     ex.add_argument("--level", choices=LEVELS, default="county")
     ex.add_argument("--compare-with", default=None)
+    ex.add_argument("--areas", default=None,
+                    help="comma-separated GEOIDs; the CSV and the figure both use "
+                         "exactly this selection")
     ex.add_argument("--figure", choices=("map", "chart", "none"), default="map")
     ex.add_argument("--data-dir", default="data/processed")
 
@@ -150,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return _dispatch(args, root, cfg, log)
+    except snapshot_mod.SnapshotMismatch as exc:
+        log(redact(str(exc)))
+        return 4
     except acs_api.MissingCredential as exc:
         log("\nNo Census API key is configured.")
         log(redact(str(exc)))
@@ -256,8 +264,11 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
 
     if args.command == "compare":
         st = server_mod.ServiceState(root)
-        report = server_mod._compare(st, args.a, args.b, args.level, args.measure)
+        report = server_mod.compatibility(st, args.a, args.b, args.level, args.measure)
         log(json.dumps(report, indent=2))
+        if not report["allowed"]:
+            log("\nThis comparison is blocked. Every reason above must be resolved "
+                "before the two releases may be shown together.")
         return 0 if report["allowed"] else 1
 
     if args.command == "fixtures":
@@ -278,18 +289,29 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
         if args.action == "show":
             log(json.dumps(projects_mod.load(root, args.id).to_json(), indent=2))
             return 0
+        if args.action == "verify":
+            project = projects_mod.load(root, args.id)
+            pin = project.pin()
+            if pin is None:
+                log(f"project '{args.id}' has no pinned inputs and cannot be "
+                    "replayed reproducibly; re-save it")
+                return 1
+            problems = snapshot_mod.verify(root, pin)
+            for problem in problems:
+                log("  PROBLEM: " + problem)
+            log(f"{len(pin.inputs)} pinned input(s): "
+                + ("OK" if not problems else f"{len(problems)} problem(s)"))
+            return 0 if not problems else 1
         log("deleted" if projects_mod.delete(root, args.id) else "no such project")
         return 0
 
     if args.command == "export":
         st = server_mod.ServiceState(root, args.data_dir)
         if args.project:
-            p = projects_mod.load(root, args.project)
+            # The project's own pinned definitions and inputs decide what is
+            # exported; the current catalog does not get a say.
             payload = {
-                "release_id": p.release_id, "measure_id": p.measure_id,
-                "level": p.level, "areas": p.areas,
-                "comparison_release_id": p.comparison_release_id,
-                "project_id": p.project_id,
+                "project_id": args.project,
                 "figure_kind": "map" if args.figure == "none" else args.figure,
                 "include_figure": args.figure != "none",
             }
@@ -300,6 +322,7 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
             payload = {
                 "release_id": args.release or cfg.raw["explorer"]["default_release"],
                 "measure_id": args.measure, "level": args.level,
+                "areas": [a for a in (args.areas or "").split(",") if a],
                 "comparison_release_id": args.compare_with,
                 "figure_kind": "map" if args.figure == "none" else args.figure,
                 "include_figure": args.figure != "none",
