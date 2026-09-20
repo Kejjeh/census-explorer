@@ -33,10 +33,35 @@ const state = {
   placeQuery: '',
   view: { k: 1, x: 0, y: 0 },
   loading: false,
+  //: True only while the values, geometry, quality and reference on screen all
+  //: came from one completed load of the selection now shown. Saving and
+  //: exporting are refused until then, because both write the selection to
+  //: disk and neither may describe a view that is half of one load and half of
+  //: another.
+  ready: false,
+  breaks: { cuts: [], min: null, max: null, classes: 0 },
 };
 
+// Overlapping loads: only the newest may change anything. Separate gates,
+// because a benchmark list and a reopened project are not the same request
+// and must not invalidate each other's results.
+const dataGate = createLoadGate();
+const benchGate = createLoadGate();
+const projectGate = createLoadGate();
+
 const RAMP = ['#eaf1f7', '#c3d9ea', '#8fb8d6', '#5691bd', '#1f6199'];
+
+/** The shade for class `i`. A map with one class uses a middle shade rather
+ *  than the lightest, which would read as a low value on a scale that has no
+ *  low and no high. */
+function rampColour(i) {
+  if (state.breaks.classes === 1) return RAMP[2];
+  return RAMP[Math.min(i, RAMP.length - 1)];
+}
 const MAX_TABLE_ROWS = 400;
+//: Pointer travel, in map units, past which a gesture is a pan rather than a
+//: click. Small enough that a deliberate click on a tract still selects it.
+const DRAG_SLOP = 4;
 const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------------------- transport */
@@ -167,15 +192,34 @@ function scopedGeoids() {
   return state.dataset.areas.filter((a) => a.level === state.level).map((a) => a.geoid);
 }
 
-function areaParam() {
-  return state.areas.length ? `&areas=${encodeURIComponent(state.areas.join(','))}` : '';
+/**
+ * A frozen copy of what is selected right now.
+ *
+ * Every request in a load is built from this snapshot rather than from the
+ * live state, so a control changed while the load is in flight cannot make one
+ * request describe a different selection from the next.
+ */
+function currentRequest() {
+  return {
+    releaseId: state.releaseId,
+    measureId: state.measureId,
+    level: state.level,
+    areas: [...state.areas],
+    benchmarkId: state.benchmarkId,
+  };
 }
 
-function selectionQuery() {
-  return `release=${encodeURIComponent(state.releaseId)}` +
-    `&measure=${encodeURIComponent(state.measureId)}` +
-    `&level=${state.level}${areaParam()}`;
+function areaParamFor(req) {
+  return req.areas.length ? `&areas=${encodeURIComponent(req.areas.join(','))}` : '';
 }
+
+function selectionQueryFor(req) {
+  return `release=${encodeURIComponent(req.releaseId)}` +
+    `&measure=${encodeURIComponent(req.measureId)}` +
+    `&level=${req.level}${areaParamFor(req)}`;
+}
+
+function selectionQuery() { return selectionQueryFor(currentRequest()); }
 
 /* ------------------------------------------------------------------ boot */
 
@@ -213,6 +257,7 @@ async function boot() {
   wireControls();
   renderLevelSwitch();
   renderSidebar();
+  updateActions();
   $('startup').hidden = true;
   $('shell').hidden = false;
   await loadBenchmarks();
@@ -245,7 +290,14 @@ function wireControls() {
   $('btn-method').addEventListener('click', () => toggleDrawer());
   $('drawer-close').addEventListener('click', () => toggleDrawer(false));
   $('btn-export').addEventListener('click', doExport);
-  $('btn-save').addEventListener('click', toggleSavePanel);
+  $('btn-brief').addEventListener('click', openBrief);
+  $('export-dismiss').addEventListener('click', () => {
+    $('export-result').hidden = true;
+  });
+  // Wrapped: passing the click event straight through made its MouseEvent the
+  // `force` argument, which is always truthy, so the button only ever opened
+  // the panel and never closed it.
+  $('btn-save').addEventListener('click', () => toggleSavePanel());
   $('save-form').addEventListener('submit', saveProject);
   $('zoom-in').addEventListener('click', () => zoomBy(1.4));
   $('zoom-out').addEventListener('click', () => zoomBy(1 / 1.4));
@@ -483,66 +535,165 @@ function renderPlaceResults() {
 /* ---------------------------------------------------------- data + render */
 
 async function loadBenchmarks() {
-  const res = await api(`/api/benchmarks?release=${encodeURIComponent(state.releaseId)}` +
-    `&level=${state.level}${areaParam()}`);
-  state.benchmarks = res.benchmarks;
-  const sel = $('benchmark-select');
-  sel.textContent = '';
-  state.benchmarks.forEach((b) => sel.add(new Option(b.label, b.benchmark_id)));
-  if (!state.benchmarks.some((b) => b.benchmark_id === state.benchmarkId)) {
-    state.benchmarkId = 'none';
-  }
-  sel.value = state.benchmarkId;
+  const req = currentRequest();
+  await benchGate.run(
+    () => api(`/api/benchmarks?release=${encodeURIComponent(req.releaseId)}` +
+      `&level=${req.level}${areaParamFor(req)}`),
+    {
+      commit: (res) => {
+        state.benchmarks = res.benchmarks;
+        const sel = $('benchmark-select');
+        sel.textContent = '';
+        res.benchmarks.forEach((b) => sel.add(new Option(b.label, b.benchmark_id)));
+        if (!res.benchmarks.some((b) => b.benchmark_id === state.benchmarkId)) {
+          state.benchmarkId = 'none';
+        }
+        sel.value = state.benchmarkId;
+      },
+      fail: (e) => {
+        // A reference list that could not be loaded must not leave the last
+        // selection's references on screen as if they still applied.
+        state.benchmarks = [];
+        state.benchmarkId = 'none';
+        $('benchmark-select').textContent = '';
+        toast(`The reference list could not be loaded: ${e.message}`, 8000);
+      },
+    });
 }
 
-function setLoading(on) {
-  state.loading = on;
-  ['btn-export', 'btn-method', 'btn-save'].forEach((id) => { $(id).disabled = on; });
-  if (on) {
-    $('map-empty').hidden = false;
-    $('map-empty').textContent = 'Loading…';
+/** Saving and exporting write the shown selection to disk; both wait for it. */
+function updateActions() {
+  const usable = state.ready && !state.loading;
+  $('btn-export').disabled = !usable;
+  $('btn-brief').disabled = !usable;
+  const submit = $('save-submit');
+  if (submit) submit.disabled = !usable;
+  const note = $('save-blocked');
+  if (note) {
+    note.hidden = usable;
+    note.textContent = usable ? '' :
+      'Saving waits for a complete view. Reopening a saved view still works.';
   }
+}
+
+function showBusy() {
+  state.loading = true;
+  $('map-empty').hidden = false;
+  $('map-empty').textContent = 'Loading…';
+}
+
+/**
+ * Take down everything that described the previous selection.
+ *
+ * A load that failed leaves nothing trustworthy behind: the table, the
+ * inspector, the comparison and the source panel all described a selection
+ * this one was meant to replace, and leaving them up would present them as
+ * current.
+ */
+function clearCurrentView() {
+  state.ready = false;
+  state.values = null;
+  state.geo = null;
+  state.quality = null;
+  state.selectionJson = null;
+  state.questionId = null;
+  state.benchmark = null;
+  state.pick = null;
+  state.compare = [];
+  state.hover = null;
+  state.breaks = { cuts: [], min: null, max: null, classes: 0 };
+  map._svg = null; map._layer = null; map._bboxes = null; map._drawn = null;
+  $('map').textContent = '';
+  $('legend').textContent = '';
+  $('map-caption').textContent = '';
+  $('readout').textContent = '';
+  $('table-head').textContent = '';
+  $('table-body').textContent = '';
+  $('table-title').textContent = '—';
+  $('table-note').textContent = '';
+  $('table-empty').hidden = true;
+  $('place-card').textContent = '';
+  $('compare-panel').textContent = '';
+  $('benchmark-card').textContent = '';
+  $('source-details').textContent = '';
+  $('drawer-body').textContent = '';
+  $('scope-bar').textContent = '';
+  updateActions();
 }
 
 async function refresh() {
   if (!state.measureId) return;
-  setLoading(true);
-  $('blocked').hidden = true;
-  try {
-    const rel = encodeURIComponent(state.releaseId);
+  const req = currentRequest();
+  await dataGate.run(async () => {
+    const rel = encodeURIComponent(req.releaseId);
     const [values, geo, quality] = await Promise.all([
-      api(`/api/values?release=${rel}&measure=${encodeURIComponent(state.measureId)}`),
-      api(`/api/geography?release=${rel}&level=${state.level}`),
-      api(`/api/quality?${selectionQuery()}`),
+      api(`/api/values?release=${rel}&measure=${encodeURIComponent(req.measureId)}`),
+      api(`/api/geography?release=${rel}&level=${req.level}`),
+      api(`/api/quality?${selectionQueryFor(req)}`),
     ]);
-    state.values = values.values;
-    state.geo = geo;
-    state.quality = quality.quality;
-    state.selectionJson = quality.selection;
-    state.questionId = quality.question_id;
-    state.benchmark = null;
-    if (state.benchmarkId && state.benchmarkId !== 'none') {
-      state.benchmark = await api(`/api/benchmark?${selectionQuery()}` +
-        `&benchmark=${encodeURIComponent(state.benchmarkId)}`);
+    // Built from the snapshot, not from the live state: by now the reference
+    // control may already hold a different value belonging to a newer load.
+    let benchmark = null;
+    if (req.benchmarkId && req.benchmarkId !== 'none') {
+      benchmark = await api(`/api/benchmark?${selectionQueryFor(req)}` +
+        `&benchmark=${encodeURIComponent(req.benchmarkId)}`);
     }
-    computeCuts();
-    render();
-  } catch (e) {
-    showBlocked('This selection could not be shown', [e.message]);
-    state.values = null;
-    $('map').textContent = '';
-    $('map-empty').hidden = false;
-    $('map-empty').textContent = 'Nothing to draw for this selection.';
-  } finally {
-    setLoading(false);
-  }
+    return {
+      req, values: values.values, geo, quality: quality.quality,
+      selectionJson: quality.selection, questionId: quality.question_id, benchmark,
+    };
+  }, {
+    start: () => { state.ready = false; updateActions(); showBusy(); },
+    commit: (r) => {
+      // One assignment block: nothing on screen is ever built from half of
+      // one load and half of another.
+      state.values = r.values;
+      state.geo = r.geo;
+      state.quality = r.quality;
+      state.selectionJson = r.selectionJson;
+      state.questionId = r.questionId;
+      state.benchmark = r.benchmark;
+      state.ready = true;
+      $('blocked').hidden = true;
+      document.body.classList.remove('stale');
+      computeBreaks();
+      render();
+    },
+    fail: (e) => {
+      clearCurrentView();
+      // The heading must name the measure the user asked for, not the last
+      // one that happened to load: the sidebar already shows the new one
+      // selected, and disagreeing with it reads as data that is still there.
+      renderHeading(currentMeasure());
+      document.body.classList.add('stale');
+      showBlocked('This selection could not be shown', [
+        e.message,
+        'Nothing from the previous selection is still on screen, and saving ' +
+        'and exporting stay unavailable until a selection loads.',
+      ], { retry: true });
+      $('map-empty').hidden = false;
+      $('map-empty').textContent = 'Nothing to draw for this selection.';
+    },
+    settle: () => { state.loading = false; updateActions(); },
+  });
 }
 
-function showBlocked(title, lines) {
+function showBlocked(title, lines, opts = {}) {
   const el = $('blocked');
   el.hidden = false;
   el.innerHTML = `<strong>${esc(title)}</strong><ul>` +
     lines.map((l) => `<li>${esc(l)}</li>`).join('') + '</ul>';
+  // Without this, a selection that failed can only be recovered by choosing a
+  // different one and coming back: the controls all short-circuit when the
+  // value they would set is already the value held.
+  if (opts.retry) {
+    const again = document.createElement('button');
+    again.type = 'button';
+    again.className = 'btn';
+    again.textContent = 'Try again';
+    again.addEventListener('click', () => refresh());
+    el.appendChild(again);
+  }
 }
 
 function usableValues() {
@@ -552,40 +703,26 @@ function usableValues() {
     .map((v) => v.e);
 }
 
-function quantileCuts(data, classes = 5) {
-  const sorted = [...data].sort((a, b) => a - b);
-  if (!sorted.length) return [];
-  const cuts = [];
-  for (let i = 1; i < classes; i += 1) {
-    const pos = (i * (sorted.length - 1)) / classes;
-    const lo = Math.floor(pos);
-    const hi = Math.min(lo + 1, sorted.length - 1);
-    cuts.push(sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo));
-  }
-  return cuts.filter((c, i, arr) => i === 0 || c > arr[i - 1]);
+function computeBreaks() {
+  state.breaks = classBreaks(usableValues(), 5);
+  state.cuts = state.breaks.cuts;
 }
 
-function computeCuts() { state.cuts = quantileCuts(usableValues(), 5); }
-
-function classOf(value) {
-  if (value === null || value === undefined) return null;
-  for (let i = 0; i < state.cuts.length; i += 1) if (value < state.cuts[i]) return i;
-  return state.cuts.length;
-}
+function classOf(value) { return classIndex(value, state.cuts); }
 
 function render() {
   const m = currentMeasure();
   if (!m) return;
-  $('measure-title').textContent = m.label;
-  $('denominator-line').textContent = m.unit === 'percent'
-    ? `Percent of ${m.out_of} · ${state.catalog.period_label}`
-    : `Number of people · ${state.catalog.period_label}`;
-  $('map-caption').textContent =
-    `${m.label}, ${levelNoun(2)}, ${state.catalog.period_label}. ` +
-    'Shading uses five quantile classes over the areas in view. ' +
-    'The table below lists the same values.' + unmatchedNote();
+  renderHeading(m);
   renderScopeBar();
   drawMap();
+  // After drawMap: the caption reports what this map actually drew.
+  $('map-caption').textContent = [
+    `${m.label}, ${levelNoun(2)}, ${state.catalog.period_label}.`,
+    shadingSentence(m),
+    'The table below lists the same values.',
+    ...coverageNote(),
+  ].filter(Boolean).join(' ');
   renderLegend(m);
   renderTable();
   renderPlaceCard();
@@ -595,17 +732,57 @@ function render() {
   if (!$('drawer').hidden) renderDrawer();
 }
 
-function unmatchedNote() {
-  // An area with no boundary at this vintage is missing from the map but
-  // present in the table and in every export. Saying so on the figure is the
-  // only place a reader would notice the difference.
+/**
+ * What the shading actually does, for this selection.
+ *
+ * The number of classes is a property of the values in view, not a constant.
+ * One borough, or a set of areas that all share a value, has one class, and a
+ * caption that promises five would describe a map nobody is looking at.
+ */
+function shadingSentence(m) {
+  const { classes, min, max } = state.breaks;
+  if (!classes) return 'No area in view has a usable estimate, so nothing is shaded.';
+  if (classes === 1) {
+    const only = fmt(min, m.unit);
+    return `Every area in view holds the same value, ${only}, so the map shows ` +
+      'one shade and no break points.';
+  }
+  return `Shading divides the areas in view into ${classes} classes by value, ` +
+    `from ${fmt(min, m.unit)} to ${fmt(max, m.unit)}.`;
+}
+
+/**
+ * Coverage, kept separate from the build-wide count.
+ *
+ * "Not drawn" is a fact about the areas in this view and this export. How many
+ * areas the whole build cannot draw is a different fact, and attaching it to a
+ * view that drew everything claims a shortfall this map does not have.
+ */
+function coverageNote() {
   const report = (state.dataset.join_reports || [])
-    .find((r) => r.level === state.level);
-  if (!report || !report.unmatched_observation_count) return '';
-  const n = report.unmatched_observation_count;
-  return ` ${n} ${levelNoun(n)} have no published boundary at this geography ` +
-    `vintage (${state.dataset.release.boundary_release}) and cannot be drawn; ` +
-    'they are still in the table and in every export.';
+    .find((r) => r.level === state.level) || {};
+  const scoped = scopedGeoids();
+  const drawn = map._drawn || new Set();
+  const unmatchedSet = new Set(report.unmatched_observations || []);
+  return coverageSentences({
+    inViewTotal: scoped.length,
+    inViewDrawn: scoped.filter((g) => drawn.has(g)).length,
+    datasetUnmatched: report.unmatched_observation_count || 0,
+    datasetTotal: report.observations_total || 0,
+    unmatchedInView: scoped.filter((g) => unmatchedSet.has(g)).length,
+    noun: state.level === 'county' ? 'borough' : 'census tract',
+    nounPlural: state.level === 'county' ? 'boroughs' : 'census tracts',
+    vintage: state.dataset.release.boundary_release,
+  });
+}
+
+/** The heading names the measure that was asked for, loaded or not. */
+function renderHeading(m) {
+  $('measure-title').textContent = m ? m.label : '—';
+  if (!m) { $('denominator-line').textContent = ''; return; }
+  $('denominator-line').textContent = m.unit === 'percent'
+    ? `Percent of ${m.out_of} · ${state.catalog.period_label}`
+    : `Number of people · ${state.catalog.period_label}`;
 }
 
 function renderScopeBar() {
@@ -665,6 +842,7 @@ function drawMap() {
     empty.textContent = 'No boundary layer is available for these areas at this ' +
       'geography vintage. The table below still carries every value.';
     map._bboxes = null;
+    map._drawn = new Set();
     return;
   }
   empty.hidden = true;
@@ -726,7 +904,7 @@ function drawMap() {
       p.setAttribute('stroke', 'var(--c-none-line)');
       p.setAttribute('stroke-dasharray', '2 2');
     } else {
-      p.setAttribute('fill', RAMP[Math.min(cls, RAMP.length - 1)]);
+      p.setAttribute('fill', rampColour(cls));
       p.setAttribute('stroke', '#ffffff');
     }
     p.setAttribute('stroke-width', '0.6');
@@ -760,11 +938,14 @@ function drawMap() {
   map._svg = svg;
   map._layer = g;
   map._bboxes = bboxes;
+  //: Exactly the areas this map drew, so the caption can say what it did and
+  //: did not cover without guessing from a build-wide join report.
+  map._drawn = new Set(Object.keys(bboxes));
   applyView();
   markMapSelection();
 }
 
-const map = { _svg: null, _layer: null, _bboxes: null };
+const map = { _svg: null, _layer: null, _bboxes: null, _drawn: null };
 
 function applyView() {
   if (!map._layer) return;
@@ -837,7 +1018,14 @@ function wireMapGestures() {
 
   host.addEventListener('pointerdown', (e) => {
     if (!map._svg || e.button !== 0) return;
-    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0 };
+    // The GEOID is read here, at the press, and not at the release: pointer
+    // capture retargets every later event in the gesture to the map container,
+    // so `pointerup` never carries the shape that was pressed. Reading it at
+    // release left clicking the map dead while hover still worked.
+    drag = {
+      id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0,
+      geoid: (e.target.dataset && e.target.dataset.geoid) || null,
+    };
     host.setPointerCapture(e.pointerId);
     host.classList.add('dragging');
   });
@@ -859,14 +1047,16 @@ function wireMapGestures() {
   });
   const endDrag = (e) => {
     if (!drag || drag.id !== e.pointerId) return;
-    const moved = drag.moved;
+    const { moved, geoid } = drag;
     drag = null;
     host.classList.remove('dragging');
-    if (moved < 4 && e.target.dataset && e.target.dataset.geoid) {
-      selectArea(e.target.dataset.geoid);
-    }
+    // A drag is a pan, not a click. Anything past a few pixels of travel
+    // selects nothing, so panning across the city never changes the selection.
+    if (moved < DRAG_SLOP && geoid) selectArea(geoid);
   };
   host.addEventListener('pointerup', endDrag);
+  // A cancelled gesture (the browser taking over, a touch turning into a
+  // scroll) selects nothing: only a completed press-and-release does.
   host.addEventListener('pointercancel', () => {
     drag = null; host.classList.remove('dragging');
   });
@@ -951,15 +1141,20 @@ function renderLegend(m) {
   const el = $('legend');
   const parts = [`<span class="lg-title">${m.unit === 'percent'
     ? `percent of ${esc(m.out_of)}` : 'people'}</span>`];
-  for (let i = 0; i <= state.cuts.length; i += 1) {
-    parts.push(`<span class="swatch" style="background:${RAMP[Math.min(i, RAMP.length - 1)]}"></span>`);
-    if (i < state.cuts.length) {
-      parts.push(`<span class="lg-num">${esc(fmt(state.cuts[i], m.unit))}</span>`);
-    }
-  }
+  // Each class is labelled by the range it covers, ends included. Showing only
+  // the interior breaks leaves a reader guessing where the first and last
+  // classes start and stop.
+  legendRanges(state.breaks).forEach(({ from, to }, i) => {
+    const label = from === to ? fmt(from, m.unit)
+      : `${fmt(from, m.unit)}–${fmt(to, m.unit)}`;
+    const fill = rampColour(i);
+    parts.push('<span class="lg-class"><span class="swatch" ' +
+      `style="background:${fill}"></span>` +
+      `<span class="lg-num">${esc(label)}</span></span>`);
+  });
   const missing = scopedGeoids().filter((g) => !(state.values?.[g]?.es === 'ok')).length;
-  parts.push('<span class="nodata"></span>');
-  parts.push(`<span>no usable estimate (${missing})</span>`);
+  parts.push('<span class="lg-class"><span class="nodata"></span>' +
+    `<span>no usable estimate (${missing})</span></span>`);
   el.innerHTML = parts.join(' ');
 }
 
@@ -1429,27 +1624,96 @@ function renderDrawer() {
 
 /* --------------------------------------------------------- brief + export */
 
+/** Open the brief for exactly what is on screen, without writing anything. */
+function openBrief() {
+  if (!state.ready) return;
+  const req = currentRequest();
+  const url = `/api/brief?${selectionQueryFor(req)}` +
+    `&question=${encodeURIComponent(state.questionId || '')}` +
+    `&benchmark=${encodeURIComponent(req.benchmarkId || 'none')}`;
+  window.open(url, '_blank', 'noopener');
+  toast('The brief opened in a new tab. It is generated from what is on ' +
+    'screen and is not saved; use Export to write it to disk, or your ' +
+    'browser’s print dialog to save it as PDF.', 8000);
+}
+
 async function doExport() {
+  if (!state.ready) return;
+  const areas = scopedGeoids();
+  $('btn-export').disabled = true;
   try {
     const res = await post('/api/export', {
       release_id: state.releaseId,
       measure_id: state.measureId,
       level: state.level,
-      areas: scopedGeoids(),
+      areas,
       question_id: state.questionId,
       benchmark_id: state.benchmarkId,
-      figure_kind: state.level === 'tract' || scopedGeoids().length > 8 ? 'map' : 'chart',
+      figure_kind: state.level === 'tract' || areas.length > 8 ? 'map' : 'chart',
       include_figure: true,
     });
-    toast(`Exported ${res.rows} rows over ${res.selection.area_count} areas to ` +
-      `${res.export_dir}: brief.html, data.csv, provenance.json, figure.svg.`, 8000);
-  } catch (e) { toast(`Export failed: ${e.message}`, 8000); }
+    renderExportResult(res);
+  } catch (e) {
+    toast(`Export failed: ${e.message}`, 8000);
+  } finally {
+    updateActions();
+  }
+}
+
+/**
+ * The export result, as something a reader can click.
+ *
+ * A path in a message that disappears after five seconds is not a delivery: it
+ * asks the reader to open a terminal. This panel stays until dismissed and
+ * links every file the export wrote.
+ */
+function renderExportResult(res) {
+  const m = currentMeasure();
+  const n = res.selection.area_count;
+  $('export-title').textContent = 'Export complete';
+  $('export-what').textContent =
+    `${m.label} — ${res.rows.toLocaleString('en-US')} row${res.rows === 1 ? '' : 's'} ` +
+    `over ${n.toLocaleString('en-US')} ${levelNoun(n)}, ${state.catalog.period_label}.` +
+    (res.data_mode === 'fixture'
+      ? ' FIXTURE MODE: these values are synthetic test data, not census findings.'
+      : '');
+  const list = $('export-files');
+  list.textContent = '';
+  (res.artifacts || []).forEach((f) => {
+    const li = document.createElement('li');
+    const open = document.createElement('a');
+    open.href = f.url;
+    open.target = '_blank';
+    open.rel = 'noopener';
+    open.textContent = f.name;
+    const what = document.createElement('span');
+    what.className = 'f-what';
+    what.textContent = f.label.includes('—') ? f.label.split('—').slice(1).join('—').trim()
+      : f.label;
+    const save = document.createElement('a');
+    save.href = `${f.url}?download=1`;
+    save.className = 'f-save';
+    save.setAttribute('download', f.name);
+    save.textContent = 'save a copy';
+    li.append(open, what, save);
+    list.appendChild(li);
+  });
+  $('export-where').textContent =
+    `Written to ${res.export_dir} in this repository. This bundle is a ` +
+    'generated snapshot, not a saved project: nothing re-checks its inputs ' +
+    'later. Save the view first if you want that check on reopening.';
+  $('export-result').hidden = false;
+  $('export-result').scrollIntoView({ block: 'nearest' });
 }
 
 /* -------------------------------------------------------------- projects */
 
 async function saveProject(event) {
   event.preventDefault();
+  if (!state.ready) {
+    toast('Nothing is saved until a selection has finished loading.');
+    return;
+  }
   const id = $('project-id').value.trim();
   if (!id) { toast('Give the view a short name first.'); return; }
   try {
@@ -1501,21 +1765,28 @@ async function renderProjects() {
 }
 
 async function reopen(projectId) {
-  let replay;
-  try {
-    replay = await api(`/api/project?id=${encodeURIComponent(projectId)}`);
-  } catch (e) {
-    if (e.kind === 'pin_mismatch') {
-      showBlocked(`“${projectId}” was not reopened`, [
-        e.message,
-        'Nothing was substituted and nothing was re-fetched.',
-      ]);
-      toast(`“${projectId}” was not reopened: its inputs changed since it was saved.`, 9000);
-    } else {
-      toast(`Could not reopen ${projectId}: ${e.message}`, 8000);
-    }
-    return;
-  }
+  // Two reopens in quick succession, or a reopen racing a control change,
+  // must not interleave: only the newest one is allowed to apply.
+  let replay = null;
+  const outcome = await projectGate.run(
+    () => api(`/api/project?id=${encodeURIComponent(projectId)}`),
+    {
+      commit: (r) => { replay = r; },
+      fail: (e) => {
+        if (e.kind === 'pin_mismatch') {
+          showBlocked(`“${projectId}” was not reopened`, [
+            e.message,
+            'Nothing was substituted and nothing was re-fetched.',
+          ]);
+          toast(`“${projectId}” was not reopened: its inputs changed since it ` +
+            'was saved.', 9000);
+        } else {
+          toast(`Could not reopen ${projectId}: ${e.message}`, 8000);
+        }
+      },
+    });
+  if (outcome.outcome !== 'committed' || !replay) return;
+
   const p = replay.project;
   const brief = replay.brief || {};
   state.releaseId = p.release_id;
@@ -1529,6 +1800,10 @@ async function reopen(projectId) {
   $('place-search').value = '';
   state.measureFilter = '';
   $('measure-search').value = '';
+  // Any load started before this project was applied now describes a
+  // selection nobody asked for.
+  dataGate.invalidate();
+  benchGate.invalidate();
   fitMap();
   renderLevelSwitch();
   renderSidebar();

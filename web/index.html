@@ -24,6 +24,7 @@
             aria-controls="drawer">Method &amp; sources</button>
     <button type="button" class="btn" id="btn-save" aria-expanded="false"
             aria-controls="save-panel">Saved views</button>
+    <button type="button" class="btn" id="btn-brief">Open brief</button>
     <button type="button" class="btn primary" id="btn-export">Export</button>
   </div>
 </header>
@@ -39,8 +40,9 @@
       <input type="text" id="project-id" placeholder="bronx-naturalisation"
              pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
     </label>
-    <button type="submit" class="btn primary">Save</button>
+    <button type="submit" class="btn primary" id="save-submit">Save</button>
   </form>
+  <p class="hint" id="save-blocked" hidden></p>
   <p class="hint">Saving pins the exact input files. Reopening checks them and
     refuses rather than showing different numbers.</p>
   <ul id="project-list" class="project-list"></ul>
@@ -93,6 +95,16 @@
     </div>
 
     <div id="scope-bar" class="scope-bar" aria-live="polite"></div>
+
+    <section id="export-result" class="export-result" aria-live="polite" hidden>
+      <div class="export-head">
+        <h2 id="export-title">Export</h2>
+        <button type="button" class="btn ghost" id="export-dismiss">Dismiss</button>
+      </div>
+      <p class="muted tiny" id="export-what"></p>
+      <ul id="export-files" class="export-files"></ul>
+      <p class="muted tiny" id="export-where"></p>
+    </section>
 
     <div id="blocked" class="blocked" hidden></div>
 
@@ -167,6 +179,7 @@
 </footer>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="core.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -33,11 +33,14 @@ python -m unittest discover -s tests -t .
 Expected:
 
 ```
-Ran 304 tests in 9.1s
+Ran 318 tests in 16.0s
 OK (skipped=3)
 ```
 
-The three skips are the live network tests, which are opt-in. **No third-party
+The three skips are the live network tests, which are opt-in. A fourth test
+runs the browser module's own tests under Node and skips with a message when
+Node is not installed; Node is not required for the service, the data pipeline
+or any other test. **No third-party
 package is required and none should be installed.**
 
 Nothing has been downloaded yet. If you want to see the application before

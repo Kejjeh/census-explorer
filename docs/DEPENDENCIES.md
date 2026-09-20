@@ -15,8 +15,18 @@ Nothing outside the Python standard library and the browser's own platform.
 | Interface | plain HTML, CSS and JavaScript | React, a bundler, a CSS framework |
 | Fonts and styles | system font stacks, local CSS | Google Fonts, a CDN |
 
+| Browser-logic tests | Node's built-in `node --test`, skipped when Node is absent | Jest, Vitest, Mocha, jsdom |
+
 The repository rule is to ask before adding a dependency. Nothing was added, so
-nothing was asked for. This was not a purity exercise: a zero-dependency build
+nothing was asked for.
+
+Node is worth naming explicitly, because it is the one tool mentioned above
+that is not already on every machine. It is **not** a dependency: nothing in
+the Python package, the service, the data pipeline or the browser needs it, and
+`pip`, `unittest` and the app all work without it. It is only how
+`web/core.js` — the page logic that has no DOM and no network — runs its own
+tests. `tests/test_ui_core.py` skips with an explanation when Node is not
+installed, in the same way the live network tests do. This was not a purity exercise: a zero-dependency build
 is what makes "no network access during import, tests, or rendering" simple to
 guarantee, and what lets the browser interface run on a machine that has never
 been online.

@@ -131,10 +131,15 @@ In the browser, the journey is:
 8. **Scope the output.** "Show only this place" narrows the map, the table, the
    brief and the export together; the scope bar above the map always says what
    the export will cover.
-9. **Save and export.** Saving pins the content digests of every input file;
-   reopening verifies them and refuses rather than showing different numbers.
-   Export writes `brief.html`, `data.csv`, `provenance.json` and `figure.svg`
-   for exactly the areas in scope.
+9. **Open the brief** to preview the write-up for what is on screen. It is
+   generated on the spot and not saved.
+10. **Save and export.** Saving pins the content digests of every input file;
+    reopening verifies them and refuses rather than showing different numbers.
+    Export writes `brief.html`, `data.csv`, `provenance.json` and `figure.svg`
+    for exactly the areas in scope, and the panel that appears links each one:
+    open it in a tab or save a copy, with no path to copy into a terminal.
+    Those links are served read-only from the `artifacts/` directory and from
+    nowhere else.
 
 "Method & sources" opens a drawer with what is being shown, the three quality
 statements, what the view does not say, and the citation. Published table codes

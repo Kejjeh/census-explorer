@@ -268,12 +268,34 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 .scope-bar .scope-text { overflow-wrap: anywhere; }
 .scope-bar:empty { display: none; }
 
+.export-result {
+  background: var(--surface); border: 1px solid var(--line-2);
+  border-left: 4px solid var(--accent); border-radius: var(--radius);
+  padding: var(--s3);
+}
+.export-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s3);
+}
+.export-head h2 { font-size: 14px; }
+.export-files { list-style: none; margin: var(--s2) 0; padding: 0; }
+.export-files li {
+  display: flex; align-items: baseline; gap: var(--s2);
+  flex-wrap: wrap; padding: 4px 0; border-top: 1px solid var(--line);
+}
+.export-files a { color: var(--accent-2); font-weight: 550; font-size: 13px; }
+.export-files .f-what { color: var(--muted); font-size: 12px; flex: 1 1 200px; }
+.export-files .f-save { font-size: 12px; font-weight: 400; }
+
+.stale .map-frame, .stale .table-block { opacity: 0.55; }
+
 .blocked {
   background: #fdf1f1; border: 1px solid #e3bcbc; border-left: 4px solid var(--bad);
   border-radius: var(--radius); padding: var(--s3); font-size: 13px;
 }
 .blocked strong { display: block; color: var(--bad); margin-bottom: var(--s1); }
-.blocked ul { margin: 0; padding-left: 18px; }
+.blocked ul { margin: 0 0 var(--s2); padding-left: 18px; }
+.blocked .btn { margin-top: var(--s1); }
 
 .map-figure { margin: 0; }
 .map-frame {
@@ -333,6 +355,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
   background: var(--c-none); border: 1px dashed var(--c-none-line);
 }
 .legend .lg-num { font-variant-numeric: tabular-nums; }
+.legend .lg-class { display: inline-flex; align-items: center; gap: 4px; }
 #map-caption { margin-top: var(--s2); }
 
 /* ------------------------------------------------------------------- table */

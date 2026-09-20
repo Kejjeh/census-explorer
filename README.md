@@ -34,7 +34,7 @@ no telemetry, and the local service holds no credentials.
 | Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 304 tests, no network |
+| Offline test suite | Working: 318 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
@@ -239,6 +239,22 @@ one rather than failing.
 - **A search that finds nothing says what this build can find.** There is no
   address search and no neighbourhood geography here; the empty result says
   that rather than leaving a blank box.
+- **Only the newest load may change what is on screen.** Controls are faster
+  than the service, so several loads can be in flight at once. An older
+  response, success or failure, is dropped rather than committed, and saving
+  and exporting stay unavailable until one complete load has landed — neither
+  may describe a view assembled from two of them.
+- **The legend describes the map in front of you.** The number of shaded
+  classes comes from the values in view: one borough, or a set of areas that
+  share a value, is one class and says so. Every break is a value that occurs
+  in the data, and every class is one at least one area falls in.
+- **Coverage is stated for the selection, not the build.** How many areas in
+  view could not be drawn is separate from how many the whole build cannot
+  draw, and a view that drew everything does not inherit the second number.
+- **An export is delivered, not announced.** The panel links the brief, the
+  data, the figure and the provenance record; the route that serves them is
+  read-only, confined to `artifacts/`, and limited to the file types an
+  export writes.
 
 ## Layout
 

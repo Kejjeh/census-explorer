@@ -34,6 +34,25 @@ from . import (benchmark as benchmark_mod, brief as brief_mod,
 from .redact import redact, redact_structure
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+#: What each file in an export bundle is, in the reader's words.
+ARTIFACT_LABELS = {
+    "brief.html": "Brief — the printable write-up, with the figure and sources",
+    "data.csv": "Data — one row per area, with margins of error and cell codes",
+    "provenance.json": "Provenance — inputs, digests and how this was built",
+    "figure.svg": "Figure — the map or chart, as published in the brief",
+    "README.txt": "README — what this folder contains",
+}
+
+#: The file types an export bundle contains, and nothing else. A file of any
+#: other type under the artifacts directory is refused rather than served.
+ARTIFACT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+}
 MAX_BODY = 1 << 20
 LEVELS = ("county", "tract")
 
@@ -1075,6 +1094,15 @@ def run_export(state: ServiceState, payload: dict) -> dict:
     return {
         "export_dir": str(out_dir.relative_to(state.repo_root)).replace("\\", "/"),
         "files": [str(p.relative_to(state.repo_root)).replace("\\", "/") for p in written],
+        # The same files addressed the way a browser can open them, so a
+        # reader never has to copy a path into a terminal. Every one of these
+        # is inside the artifacts directory; the route that serves them
+        # refuses anything else.
+        "artifacts": [
+            {"name": p.name,
+             "label": ARTIFACT_LABELS.get(p.name, p.name),
+             "url": "/artifacts/" + str(p.relative_to(artifacts_root)).replace("\\", "/")}
+            for p in written],
         "rows": csv_text.count("\n") - 1,
         "data_mode": data_mode,
         "selection": sel.to_json(),
@@ -1149,6 +1177,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path.startswith("/api/"):
                 return self._api_get(parsed.path, query)
+            if parsed.path.startswith("/artifacts/"):
+                return self._artifact(parsed.path, query)
             return self._static(parsed.path)
         except snapshot_mod.SnapshotMismatch as exc:
             self._json({"error": redact(str(exc)), "kind": "pin_mismatch"}, 409)
@@ -1214,6 +1244,44 @@ class Handler(BaseHTTPRequestHandler):
         if ctype.startswith("text/") or ctype in ("application/javascript",):
             ctype += "; charset=utf-8"
         self._send(200, target.read_bytes(), ctype)
+
+    # -- exported artifacts ----------------------------------------------
+    def _artifact(self, path: str, query: dict[str, list[str]]) -> None:
+        """Serve one file from an export bundle, and nothing else.
+
+        This exists so that a reader can open the brief and save the CSV
+        without copying a path into a terminal. It is read-only, confined to
+        the artifacts directory, and limited to the file types an export
+        bundle actually contains: it is not a file browser for the
+        repository, and it must never become one.
+        """
+        root = (self.state.repo_root / "artifacts").resolve()
+        raw = urllib.parse.unquote(path[len("/artifacts/"):])
+        if "\x00" in raw or "\\" in raw:
+            return self._error(403, "forbidden path")
+        rel = posixpath.normpath(raw.lstrip("/"))
+        if rel in ("", ".") or rel.startswith("..") or Path(rel).is_absolute():
+            return self._error(403, "forbidden path")
+
+        # resolve() walks every symbolic link in the chain, so a link planted
+        # inside an export directory cannot be used to read a file outside it.
+        # The containment check is made on the resolved path, never on the
+        # string the request supplied.
+        target = (root / rel).resolve()
+        if not target.is_relative_to(root):
+            return self._error(403, "forbidden path")
+        if not target.is_file():
+            return self._error(404, f"not found: {rel}")
+
+        ctype = ARTIFACT_TYPES.get(target.suffix.lower())
+        if ctype is None:
+            return self._error(403, "this file type is not served")
+
+        extra = {}
+        if (query.get("download") or [""])[0] == "1":
+            extra["Content-Disposition"] = (
+                f'attachment; filename="{target.name}"')
+        self._send(200, target.read_bytes(), ctype, extra)
 
     # -- API -------------------------------------------------------------
     def _api_get(self, path: str, query: dict[str, list[str]]) -> None:
