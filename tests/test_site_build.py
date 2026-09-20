@@ -355,9 +355,6 @@ class RoundTripTests(_Built):
         bundle = self.root / "roundtrip"
         bundle.mkdir(exist_ok=True)
         if not (bundle / "site").exists():
-            (bundle / "site").symlink_to(self.out) if hasattr(os, "symlink") \
-                else None
-        if not (bundle / "site").exists():
             import shutil
             shutil.copytree(self.out, bundle / "site")
         self.build_expected(bundle)
