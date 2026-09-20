@@ -1,9 +1,16 @@
 # Census Explorer
 
-A local, offline-first explorer for official census data: a searchable measure
-catalog, a linked map and table, visible margins of error and definitions,
-saved project definitions, and exports that carry their own provenance. New
-York City is the first project; the data engine is independent of it.
+**Turn a question about a place into a defensible brief someone can
+understand, check and reuse.**
+
+A local, offline-first tool for official census data. Pick one of three
+starting questions, pick the place, pick what to show, and get a print-ready
+brief with the definitions, the denominators, the margins of error and the
+sources attached — plus the CSV and the provenance bundle behind it. New York
+City is the first project; the data engine is independent of it.
+
+Who it is aimed at, and whether anyone would pay for it, are **hypotheses**.
+See [docs/PRODUCT_DIRECTION.md](docs/PRODUCT_DIRECTION.md).
 
 Everything runs on your own machine. There is no account, no hosted service and
 no telemetry, and the local service holds no credentials.
@@ -12,6 +19,11 @@ no telemetry, and the local service holds no credentials.
 
 | Capability | State |
 | --- | --- |
+| Three guided questions mapped to validated measures | Working |
+| Plain-language selection summary: what is counted, out of what | Working |
+| Compatible benchmark built by adding underlying counts | Working |
+| Quality as three separate statements, no combined score | Working |
+| Print-ready brief from the same validated selection | Working |
 | ACS retrieval for the five boroughs and all NYC census tracts | Working, 2019-2023 and 2018-2022 ACS five-year |
 | Exact cells, labels and universes resolved from official release metadata | Working; no code is written from memory |
 | Immutable raw cache, checksums, retrieval timestamps, manifests | Working; `verify manifests` re-hashes every artifact |
@@ -19,9 +31,10 @@ no telemetry, and the local service holds no credentials.
 | Matching-vintage Census polygons, string GEOIDs, join accounting | Working; boroughs and 2,324 tracts |
 | Local browser app: catalog, map, sortable table, detail drawer | Working |
 | Saved projects, CSV + provenance export, SVG figure export | Working |
-| Second-period comparison, gated on evidence | Working at borough level. **Blocked at tract level**: 71 of 2,324 tracts fail the geometry-equivalence check between GENZ2022 and GENZ2023 |
+| Comparing places within one period | Working; needs no boundary equivalence |
+| Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 174 tests, no network |
+| Offline test suite | Working: 210 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
@@ -145,7 +158,7 @@ start-up.
 ## Verify the build
 
 ```powershell
-python -m unittest discover -s tests -t .          # 174 offline tests
+python -m unittest discover -s tests -t .          # 210 offline tests
 python -m census_explorer.cli verify manifests     # re-hash the raw cache
 python -m census_explorer.cli verify catalog       # cells vs the published release
 python -m census_explorer.cli reconcile --release acs5_2023
@@ -186,13 +199,19 @@ one rather than failing.
 - **Comparisons are refused by default.** A comparison is drawn only when every
   applicable check has actually run and passed. Different survey products or
   period lengths are blocked. A comparison across boundary vintages is blocked
-  until equivalence is established, because a shared GEOID is not evidence that
-  two releases describe the same area. A published cell label that changed in a
-  way nobody has reviewed is blocked, not disclosed and drawn anyway. A check
-  that could not be performed — no measure named, metadata not cached — blocks
-  rather than being skipped. Overlapping five-year periods are allowed but carry
-  a mandatory disclosure that they are not independent observations, and both
-  panels share one set of class breaks.
+  until equivalence is established by the same vintage, documented provider
+  correspondence, or a scoped review — a shared GEOID is not evidence, and
+  neither is a computed resemblance between two polygons. A published cell
+  label that changed in a way nobody has reviewed is blocked, not disclosed and
+  drawn anyway. A check that could not be performed — no measure named,
+  metadata not cached — blocks rather than being skipped.
+- **A question offers nothing the data cannot support.** No income, poverty,
+  housing or rent: those tables are not in this build, so no question mentions
+  them. No neighbourhood names: there are no documented neighbourhood
+  boundaries here, so a census tract is called a census tract.
+- **Quality is three statements, not a score.** Uncertainty, comparison
+  eligibility and reference period are different problems. There is no combined
+  trust number, no "significant change" claim, and no causal language.
 - **A saved project reproduces exactly, or refuses to open.** It pins the
   content digests of the files it was built from — the measure values, the
   geometry, the dataset's measure definitions and the retrieval manifests — and
@@ -225,6 +244,10 @@ artifacts/           git-ignored: export bundles
 
 ## Documentation
 
+- [Runbook](docs/RUNBOOK.md): fresh checkout to a finished brief, with the
+  expected output and timings at each step.
+- [Product direction](docs/PRODUCT_DIRECTION.md): the promise, what is
+  hypothesis, and the roadmap as candidates rather than commitments.
 - [Usage and verification](docs/USAGE.md): every command, with expected output.
 - [Data handling decisions](docs/DATA_HANDLING.md): universes, denominators,
   annotations, margins of error, geography and comparison rules.
@@ -240,14 +263,17 @@ artifacts/           git-ignored: export bundles
 
 - Only NYC counties and tracts, and only the two ACS five-year releases listed
   in `config/project.json`, have been retrieved and validated.
-- **The tract-level comparison between 2019-2023 and 2018-2022 ACS is blocked.**
-  Comparing the two vintages' actual polygons, 71 of 2,324 shared tracts differ
-  beyond the documented tolerance (worst case: 7.3% of area, 344 m of centroid
-  movement). They are mostly small waterfront tracts and the differences may
-  well be cartographic, but nothing in the data says so, so the comparison waits
-  for a human to look at them and record a reviewed equivalence in
-  `config/geography_equivalence.json`. The borough-level comparison passes the
-  same check on computed geometry and is available.
+- **Comparing two reference periods is blocked at every level.** Equivalence
+  across boundary vintages requires documented provider correspondence or a
+  scoped review, and this repository ships neither. Measuring the published
+  footprints (`cli geography footprint`) shows why the question is real: 73 of
+  2,324 shared tracts and 3 of 5 counties differ beyond the measurement
+  tolerance between GENZ2022 and GENZ2023. That measurement informs a review;
+  it cannot replace one. Comparing **places within one period** is unaffected.
+- **A saved brief detects tampering; it is not an archive.** It pins the digest
+  of every input and refuses to reopen if one changed. It does not keep a copy
+  of the data and cannot restore an earlier version. Durable versioned briefs
+  are on the roadmap, not in this build.
 - The measure catalog is 47 measures across five tables. It is not a
   500,000-variable library and does not attempt platform parity.
 - The map uses local boundary layers and a simple equirectangular projection
