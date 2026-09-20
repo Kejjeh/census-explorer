@@ -158,9 +158,15 @@ class BenchmarkTests(unittest.TestCase):
         self.assertIn("degrades", bench.moe_reason)
 
     def test_controlled_components_are_said_to_be_controlled_not_zero(self):
-        values = {g: {"e": 100, "es": "ok", "m": 0, "ms": "ok",
-                      "flags": ["B01003_001 controlled estimate (MOE treated as zero)"]}
-                  for g in ("a", "b")}
+        # Built through the real path so the explicit provenance is genuine,
+        # not asserted by hand.
+        from census_explorer import dataset as dataset_mod, measures as measures_mod
+        from census_explorer.sentinels import classify
+        controlled = dataset_mod.compact_value(measures_mod.compute(
+            self.COUNT, "a", {"B05002_013": classify("100")},
+            {"B05002_013": classify("-555555555")}).to_json())
+        self.assertTrue(controlled.get("ctl"), "fixture precondition")
+        values = {g: dict(controlled) for g in ("a", "b")}
         bench = benchmark_mod.aggregate(self.COUNT, values, ["a", "b"], "x", "x", "b")
         self.assertTrue(bench.controlled)
         self.assertIn("no sampling error", bench.moe_reason)

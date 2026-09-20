@@ -34,7 +34,7 @@ no telemetry, and the local service holds no credentials.
 | Comparing places within one period | Working; needs no boundary equivalence |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 237 tests, no network |
+| Offline test suite | Working: 255 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
@@ -158,7 +158,7 @@ start-up.
 ## Verify the build
 
 ```powershell
-python -m unittest discover -s tests -t .          # 237 offline tests
+python -m unittest discover -s tests -t .          # 255 offline tests
 python -m census_explorer.cli verify manifests     # re-hash the raw cache
 python -m census_explorer.cli verify catalog       # cells vs the published release
 python -m census_explorer.cli reconcile --release acs5_2023
@@ -192,7 +192,9 @@ one rather than failing.
 - **Missing uncertainty is unavailable.** The one exception is the documented
   `-555555555` annotation, which states that a controlled estimate has no
   sampling error; it is applied as published and always flagged in the drawer
-  and the export.
+  and the export. That claim is recorded when the value is computed, never
+  inferred later: a controlled denominator does not make a share controlled,
+  and a margin of error that could not be computed stays unknown.
 - **Birthplace is a stock, not a flow.** No measure describes a place of birth
   as a recent arrival, and "born in state of residence" is labelled as New York
   *State*, never New York *City*.

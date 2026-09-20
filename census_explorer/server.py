@@ -482,7 +482,7 @@ def build_figure_for(state: ServiceState, sel: selection_mod.Selection,
                 row_values.append({
                     "e": v.get("e") if v.get("es") == "ok" else None,
                     "m": v.get("m") if v.get("ms") == "ok" else None,
-                    "controlled": is_controlled_value(v) and not v.get("m"),
+                    "controlled": is_controlled_value(v),
                     "note": plain_reason(v) if v.get("er") else "no usable estimate",
                 })
             rows.append({"label": sel.area_names.get(geoid, geoid), "values": row_values})
@@ -503,8 +503,15 @@ def build_figure_for(state: ServiceState, sel: selection_mod.Selection,
 # ---------------------------------------------------------------------------
 
 def is_controlled_value(v: dict) -> bool:
-    """The stored value came from an estimate controlled to an independent total."""
-    return any("controlled" in flag for flag in (v.get("flags") or []))
+    """Whether this value genuinely carries no sampling error.
+
+    Reads the explicit flag recorded when the value was computed. It is never
+    inferred from source-flag text: flags from the numerator and the
+    denominator are pooled, so a controlled denominator would otherwise make a
+    share with an unknown numerator margin of error look like a value with no
+    sampling error at all.
+    """
+    return v.get("ctl") is True
 
 
 def plain_reason(v: dict, which: str = "e") -> str:
@@ -544,7 +551,7 @@ def _reliability_words(v: dict, unit: str) -> str:
     """
     if v.get("es") != "ok":
         return plain_reason(v, "e")
-    if is_controlled_value(v) and not v.get("m"):
+    if is_controlled_value(v):
         return ("controlled to an independent population estimate, so it carries "
                 "no sampling error")
     if v.get("ms") != "ok":
@@ -705,7 +712,7 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
             "name": sel.area_names.get(geoid, geoid),
             "estimate": v.get("e") if v.get("es") == "ok" else None,
             "moe": v.get("m") if v.get("ms") == "ok" else None,
-            "controlled": is_controlled_value(v) and not v.get("m"),
+            "controlled": is_controlled_value(v),
             "quality": _reliability_words(v, measure.unit),
         })
 

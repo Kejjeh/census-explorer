@@ -379,6 +379,12 @@ def compact_value(value: dict) -> dict:
     if value.get("numerator") is not None and value["kind"] == "share":
         out["n"] = num(value["numerator"], 0)
         out["d"] = num(value["denominator"], 0)
+    if value.get("controlled"):
+        # Explicit provenance. Consumers must read this rather than looking for
+        # the word "controlled" in a source flag: flags are pooled across the
+        # numerator and the denominator, so one cell's flag says nothing about
+        # the result.
+        out["ctl"] = True
     if value.get("source_flags"):
         out["flags"] = value["source_flags"]
     return out

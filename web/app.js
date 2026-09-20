@@ -589,7 +589,10 @@ function plainReason(v, which) {
 }
 
 function isControlled(v) {
-  return (v.flags || []).some((f) => f.includes('controlled'));
+  // The explicit flag recorded when the value was computed. Never inferred
+  // from source-flag text: flags are pooled across numerator and denominator,
+  // so one cell's flag says nothing about the result's uncertainty.
+  return v.ctl === true;
 }
 
 function fmtMoe(value, unit) {
@@ -602,7 +605,7 @@ function fmtMoe(value, unit) {
 function reliabilityWords(v, unit) {
   // Says something the margin-of-error column does not already say.
   if (v.es !== 'ok') return plainReason(v, 'e');
-  if (isControlled(v) && !v.m) {
+  if (isControlled(v)) {
     return 'controlled to an independent population estimate, so it carries no sampling error';
   }
   if (v.ms !== 'ok') return `margin of error unavailable: ${plainReason(v, 'm')}`;
@@ -626,7 +629,7 @@ function rowsForTable() {
       name: area ? area.name : geoid,
       estimate: v.es === 'ok' ? v.e : null,
       moe: v.ms === 'ok' ? v.m : null,
-      controlled: isControlled(v) && !v.m,
+      controlled: isControlled(v),
       quality: reliabilityWords(v, o.unit),
     };
   });
@@ -790,7 +793,7 @@ function renderDrawer() {
     parts.push(`<dt>Estimate</dt><dd>${v.es === 'ok'
       ? esc(fmt(v.e, o.unit)) : `<span class="caveat">unavailable — ${esc(v.er || 'no reason recorded')}</span>`}</dd>`);
     parts.push(`<dt>Margin of error</dt><dd>${v.ms === 'ok'
-      ? (isControlled(v) && !v.m
+      ? (isControlled(v)
         ? 'none — controlled to an independent population estimate'
         : `${esc(fmtMoe(v.m, o.unit))} at 90% confidence`)
       : `<span class="caveat">unavailable — ${esc(plainReason(v, 'm'))}. Missing uncertainty is unavailable, not zero.</span>`}</dd>`);

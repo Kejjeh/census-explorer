@@ -45,6 +45,11 @@ class MeasureValue:
     # Inputs kept for the detail drawer.
     numerator: float | None = None
     denominator: float | None = None
+    #: Explicit provenance, not inferred from flag text: every estimate behind
+    #: this value is controlled to an independent population total, so the
+    #: result carries no sampling error. False whenever the margin of error is
+    #: merely unknown.
+    controlled: bool = False
     source_flags: list[str] = field(default_factory=list)
 
     @property
@@ -58,6 +63,11 @@ class MeasureValue:
         if self.kind != "count":
             return None
         if self.estimate_status != OK or self.moe_status != OK:
+            return None
+        if self.controlled:
+            # A controlled estimate has no sampling error, so a coefficient of
+            # variation is zero by construction. Reporting "CV 0%" reads as a
+            # measurement; the controlled wording says it properly.
             return None
         if not self.estimate or self.moe is None:
             return None
@@ -88,6 +98,7 @@ class MeasureValue:
             "moe_reason": self.moe_reason,
             "numerator": self.numerator,
             "denominator": self.denominator,
+            "controlled": self.controlled,
             "cv_percent": self.cv_percent,
             "reliability": self.reliability,
             "source_flags": self.source_flags,
@@ -101,6 +112,12 @@ class _Agg:
     moe: float | None
     moe_reason: str | None
     flags: list[str]
+    #: True only when a margin of error was actually computed and every cell
+    #: that contributed to it was controlled to an independent population
+    #: estimate. One controlled component among several does not make a sum
+    #: controlled, and a component whose margin of error could not be computed
+    #: makes the result unknown rather than absent.
+    controlled: bool = False
 
 
 def aggregate_cells(cells: Iterable[tuple[str, Cell, Cell]]) -> _Agg:
@@ -113,6 +130,8 @@ def aggregate_cells(cells: Iterable[tuple[str, Cell, Cell]]) -> _Agg:
     est_problem: str | None = None
     moe_problem: str | None = None
     flags: list[str] = []
+    controlled_components = 0
+    measured_components = 0
 
     any_cell = False
     for code, est, moe in cells:
@@ -130,6 +149,7 @@ def aggregate_cells(cells: Iterable[tuple[str, Cell, Cell]]) -> _Agg:
             # its margin of error may be treated as zero. The contribution is
             # zero rather than unknown, and the fact is always flagged.
             flags.append(f"{code} controlled estimate (MOE treated as zero)")
+            controlled_components += 1
             continue
         if moe is None or moe.status != "ok" or moe.value is None:
             detail = (moe.meaning if moe is not None else "margin of error not published")
@@ -139,14 +159,18 @@ def aggregate_cells(cells: Iterable[tuple[str, Cell, Cell]]) -> _Agg:
                 flags.append(f"{code} MOE {moe.symbol}")
             continue
         variance += float(moe.value) ** 2
+        measured_components += 1
 
     if not any_cell:
         return _Agg(None, "no cells supplied", None, "no cells supplied", flags)
     if est_problem is not None:
         return _Agg(None, est_problem, None, est_problem, flags)
     if moe_problem is not None:
-        return _Agg(total, None, None, moe_problem, flags)
-    return _Agg(total, None, math.sqrt(variance), None, flags)
+        # The margin of error is unknown, not absent, whatever flags the other
+        # cells contributed.
+        return _Agg(total, None, None, moe_problem, flags, controlled=False)
+    controlled = controlled_components > 0 and measured_components == 0
+    return _Agg(total, None, math.sqrt(variance), None, flags, controlled=controlled)
 
 
 def proportion_moe(numerator: float, denominator: float,
@@ -166,6 +190,17 @@ def proportion_moe(numerator: float, denominator: float,
         return (math.sqrt(moe_num ** 2 + (p ** 2) * (moe_den ** 2)) / denominator,
                 "ratio formula (proportion radicand was negative)")
     return math.sqrt(radicand) / denominator, "proportion formula"
+
+
+CONTROLLED_NOTE = ("every contributing estimate is controlled to an independent "
+                   "population estimate, so this carries no sampling error")
+
+
+def _note_control(value: "MeasureValue") -> None:
+    if not value.controlled:
+        return
+    value.moe_reason = (f"{value.moe_reason}; {CONTROLLED_NOTE}"
+                        if value.moe_reason else CONTROLLED_NOTE)
 
 
 def compute(measure: MeasureDef, geoid: str,
@@ -199,6 +234,9 @@ def compute(measure: MeasureDef, geoid: str,
         if num.moe is None:
             value.moe_status = UNAVAILABLE
             value.moe_reason = num.moe_reason
+        else:
+            value.controlled = num.controlled
+        _note_control(value)
         return value
 
     den = aggregate_cells(pairs(measure.denominator_cells))
@@ -235,4 +273,8 @@ def compute(measure: MeasureDef, geoid: str,
         return value
     value.moe = moe_p * 100.0
     value.moe_reason = formula
+    # A share is controlled only when both sides are: a controlled denominator
+    # with a sampled numerator still carries the numerator's sampling error.
+    value.controlled = num.controlled and den.controlled
+    _note_control(value)
     return value

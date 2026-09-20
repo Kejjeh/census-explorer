@@ -7,7 +7,7 @@ evidence that the steps work, not a benchmark: step 1 in particular depends
 entirely on your connection to the Census Bureau.
 
 Measured on the fresh checkout: 8.6 s for the test suite (210 tests at
-the time of that run; 237 now), 10.3 s to retrieve
+the time of that run; 255 now), 10.3 s to retrieve
 one release (435 MB streamed), 3.6 s to reconcile, 7.9 s to build, 0.3 s to
 verify, and 0.7 s from opening the browser to the first drawn answer. The
 resulting cache is 18 MB of raw data and 12 MB of built dataset.
@@ -33,7 +33,7 @@ python -m unittest discover -s tests -t .
 Expected:
 
 ```
-Ran 237 tests in 8.5s
+Ran 255 tests in 8.5s
 OK (skipped=3)
 ```
 

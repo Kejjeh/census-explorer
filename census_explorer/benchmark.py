@@ -190,6 +190,7 @@ def aggregate(measure: MeasureDef, values: dict[str, dict], geoids: list[str],
 
     variance = 0.0
     controlled_components = 0
+    measured_components = 0
     for geoid in geoids:
         v = values.get(geoid) or {}
         if v.get("ms") != "ok" or v.get("m") is None:
@@ -211,10 +212,15 @@ def aggregate(measure: MeasureDef, values: dict[str, dict], geoids: list[str],
                 "sampling error; that error is simply not quantified here.")
             return bench
         variance += float(v["m"]) ** 2
-        if any("controlled" in f for f in (v.get("flags") or [])):
+        # Explicit provenance only. A flag mentioning control may have come
+        # from one cell of one component and says nothing about the total.
+        if v.get("ctl") is True:
             controlled_components += 1
+        else:
+            measured_components += 1
     bench.moe = math.sqrt(variance)
-    if controlled_components == len(geoids) and bench.moe == 0:
+    if (controlled_components == len(geoids) and measured_components == 0
+            and bench.moe == 0):
         bench.controlled = True
         bench.moe_reason = (
             "every component is controlled to an independent population estimate, "

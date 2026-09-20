@@ -384,13 +384,40 @@ percentage. Writing "±0.5%" invites reading it as half a percent *of the
 estimate*, which is a different and much smaller number, so it is written
 "±0.5 points".
 
-## Controlled totals say so
+## Controlled totals say so, and only when they are
 
-An estimate controlled to an independent population total has no sampling error.
-Printing "±0" reads as a measurement of remarkable precision rather than the
-absence of one, so the table, the chart tooltip, the benchmark row and the brief
-all say "none" with the reason. This applies to individual areas as well as to
-combined references.
+An estimate controlled to an independent population total has no sampling
+error. Printing "±0" reads as a measurement of remarkable precision rather than
+the absence of one, so the table, the chart tooltip, the benchmark row and the
+brief all say "none" with the reason. This applies to individual areas as well
+as to combined references.
+
+**That claim is recorded, never inferred.** A margin of error that could not be
+computed is *unknown*; one that is zero because every contributing estimate is
+controlled is *absent*. Describing the first as the second understates
+uncertainty, and `None` is not zero.
+
+`measures.compute` records an explicit `controlled` flag, carried into storage
+as `ctl`, and sets it only when all of the following hold:
+
+- a margin of error was actually computed, so its status is `ok`;
+- every cell that contributed to it was controlled;
+- no contributing cell had a margin of error that could not be computed.
+
+For a share, both sides must qualify. A controlled denominator with a sampled
+numerator still carries the numerator's sampling error, so the share is not
+controlled — and a controlled denominator with a numerator whose margin of
+error is missing yields an *unknown* margin of error, not an absent one.
+
+Consumers read that flag. None of them looks for the word "controlled" in a
+source flag: flags are pooled from the numerator and the denominator, so one
+cell's flag says nothing about the result. A test asserts that no consumer
+reintroduces the inference.
+
+A published margin of error of zero that carries no controlled provenance is
+reported as published — "± 0" — rather than dressed up as an absence of
+sampling error. And a coefficient of variation is suppressed for a controlled
+count: it is zero by construction, and "CV 0%" reads as a measurement.
 
 ## Provenance
 

@@ -261,11 +261,26 @@ class NativityLabelTests(unittest.TestCase):
 
 class BriefBenchmarkTests(_Fixture):
     def make_controlled(self, measure_id="foreign_born_population"):
+        """Give every borough a genuinely controlled value.
+
+        Built through measures.compute from the published annotation rather
+        than assembled by hand, so the explicit controlled provenance is real.
+        """
+        from census_explorer import dataset as dataset_mod, measures as measures_mod
+        from census_explorer.config import MeasureDef
+        from census_explorer.sentinels import classify
+
+        definition = MeasureDef(
+            measure_id=measure_id, label="c", concept="c", unit="persons",
+            kind="count", numerator_cells=["B05002_013"], denominator_cells=[],
+            universe_note="u", definition_note="d")
+        controlled = dataset_mod.compact_value(measures_mod.compute(
+            definition, "x", {"B05002_013": classify("100")},
+            {"B05002_013": classify("-555555555")}).to_json())
+        assert controlled.get("ctl"), "fixture precondition: value must be controlled"
         values = self.state.values("testrel", measure_id)
         for geoid in self.cfg.county_geoids:
-            values[geoid] = {
-                "e": 100, "es": "ok", "m": 0, "ms": "ok",
-                "flags": ["B05002_013 controlled estimate (MOE treated as zero)"]}
+            values[geoid] = dict(controlled)
 
     def test_a_controlled_total_is_not_printed_as_plus_minus_zero(self):
         self.make_controlled()
