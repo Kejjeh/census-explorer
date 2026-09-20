@@ -40,9 +40,17 @@ class GeographyError(ValueError):
 EQUIVALENCE_CONFIG = (Path(__file__).resolve().parent.parent
                       / "config" / "geography_equivalence.json")
 
-#: Metres per degree, adequate for comparing two renderings of the same area.
+#: Metres per degree, adequate over a single city.
 _METRES_PER_DEGREE_LAT = 110574.0
 _METRES_PER_DEGREE_LON_EQUATOR = 111320.0
+
+#: Evidence kinds, strongest first. Only the first three can establish that two
+#: releases describe the same area.
+SAME_VINTAGE = "same_vintage"
+PROVIDER_CORRESPONDENCE = "provider_correspondence"
+REVIEWED_RECORD = "reviewed_record"
+FOOTPRINT_COMPARISON = "footprint_comparison"
+NO_EVIDENCE = "none"
 
 
 def equivalence_rule() -> dict[str, Any]:
@@ -54,43 +62,43 @@ def equivalence_rule() -> dict[str, Any]:
 class GeographyEvidence:
     """Why two releases' areas may (or may not) be compared one to one.
 
-    ``established`` is the only field that decides anything.  Everything else
-    exists so the reason can be shown rather than asserted.
+    ``established`` is the only field that decides anything, and a computed
+    measurement never sets it.  Measuring that two published polygons look
+    alike is not the same as knowing the Census Bureau defines them as the
+    same area, so the measurement is reported and the decision waits for the
+    provider's own correspondence or a scoped human review.
     """
 
-    kind: str                  # same_vintage | computed_geometry | reviewed_record | none
+    kind: str
     established: bool
     level: str
     boundary_release_a: str
     boundary_release_b: str
     detail: str
     areas_compared: int = 0
-    max_relative_area_difference: float | None = None
-    max_centroid_shift_metres: float | None = None
+    measurements: dict[str, Any] = field(default_factory=dict)
     failing_areas: list[str] = field(default_factory=list)
-    #: The areas equivalence was actually established for. ``None`` means
-    #: "every shared area", which only same-vintage evidence may claim.
+    #: The areas equivalence was established for. ``None`` means "every shared
+    #: area", which only same-vintage evidence may claim.
     established_areas: list[str] | None = None
     source: str = ""
 
     @classmethod
     def same_vintage(cls, level: str, boundary_release: str) -> "GeographyEvidence":
         return cls(
-            kind="same_vintage", established=True, level=level,
+            kind=SAME_VINTAGE, established=True, level=level,
             boundary_release_a=boundary_release, boundary_release_b=boundary_release,
-            detail=(f"both releases use boundary vintage {boundary_release}, so areas "
-                    "are the same by construction"),
-            source="config/geography_equivalence.json",
-        )
+            detail=(f"both releases use boundary vintage {boundary_release}, so the "
+                    "areas are the same by construction"),
+            source="config/geography_equivalence.json")
 
     @classmethod
     def none(cls, level: str, a: str, b: str, detail: str) -> "GeographyEvidence":
-        return cls(kind="none", established=False, level=level,
+        return cls(kind=NO_EVIDENCE, established=False, level=level,
                    boundary_release_a=a, boundary_release_b=b, detail=detail,
                    source="config/geography_equivalence.json")
 
     def applies_to(self, level: str, a: str, b: str) -> bool:
-        """Evidence is specific to a level and a pair of vintages."""
         if self.level != level:
             return False
         return {self.boundary_release_a, self.boundary_release_b} == {a, b}
@@ -104,8 +112,7 @@ class GeographyEvidence:
             "boundary_release_b": self.boundary_release_b,
             "detail": self.detail,
             "areas_compared": self.areas_compared,
-            "max_relative_area_difference": self.max_relative_area_difference,
-            "max_centroid_shift_metres": self.max_centroid_shift_metres,
+            "measurements": self.measurements,
             "failing_area_count": len(self.failing_areas),
             "failing_areas": sorted(self.failing_areas)[:50],
             "established_area_count": (None if self.established_areas is None
@@ -114,169 +121,280 @@ class GeographyEvidence:
         }
 
 
-def _ring_metrics(ring: list, lat0: float) -> tuple[float, float, float]:
-    """Signed planar area and area-weighted centroid of one ring, in metres."""
-    mx = _METRES_PER_DEGREE_LON_EQUATOR * math.cos(math.radians(lat0))
-    my = _METRES_PER_DEGREE_LAT
-    area2 = 0.0
-    cx = 0.0
-    cy = 0.0
-    for i in range(len(ring) - 1):
-        x1, y1 = ring[i][0] * mx, ring[i][1] * my
-        x2, y2 = ring[i + 1][0] * mx, ring[i + 1][1] * my
-        cross = x1 * y2 - x2 * y1
-        area2 += cross
-        cx += (x1 + x2) * cross
-        cy += (y1 + y2) * cross
-    area = area2 / 2.0
-    if area == 0:
-        return 0.0, 0.0, 0.0
-    return area, cx / (3.0 * area2), cy / (3.0 * area2)
+# -- geometry helpers -------------------------------------------------------
+
+def _scales(lat0: float) -> tuple[float, float]:
+    return (_METRES_PER_DEGREE_LON_EQUATOR * math.cos(math.radians(lat0)),
+            _METRES_PER_DEGREE_LAT)
 
 
-def geometry_metrics(geometry: dict[str, Any] | None) -> tuple[float, tuple[float, float]] | None:
-    """Absolute area in square metres and the centroid, in metres."""
+def rings_of(geometry: dict[str, Any] | None) -> list[list]:
     if not geometry:
-        return None
-    rings: list[list] = []
+        return []
     if geometry["type"] == "Polygon":
-        rings = list(geometry["coordinates"])
-    elif geometry["type"] == "MultiPolygon":
-        for poly in geometry["coordinates"]:
-            rings.extend(poly)
-    else:
+        return [r for r in geometry["coordinates"] if len(r) >= 4]
+    if geometry["type"] == "MultiPolygon":
+        return [r for poly in geometry["coordinates"] for r in poly if len(r) >= 4]
+    return []
+
+
+def geometry_metrics(geometry: dict[str, Any] | None,
+                     lat0: float | None = None
+                     ) -> tuple[float, tuple[float, float]] | None:
+    """Absolute area in square metres and the centroid, in metres.
+
+    ``lat0`` fixes the projection origin. Two geometries being compared must
+    use the same one, or the comparison measures the projection rather than
+    the shapes.
+    """
+    rings = rings_of(geometry)
+    if not rings:
         return None
-    if not rings or not rings[0]:
-        return None
-    lat0 = rings[0][0][1]
+    if lat0 is None:
+        lat0 = rings[0][0][1]
+    mx, my = _scales(lat0)
 
     total = 0.0
     wx = 0.0
     wy = 0.0
     for ring in rings:
-        if len(ring) < 4:
+        area2 = cx = cy = 0.0
+        for i in range(len(ring) - 1):
+            x1, y1 = ring[i][0] * mx, ring[i][1] * my
+            x2, y2 = ring[i + 1][0] * mx, ring[i + 1][1] * my
+            cross = x1 * y2 - x2 * y1
+            area2 += cross
+            cx += (x1 + x2) * cross
+            cy += (y1 + y2) * cross
+        if area2 == 0:
             continue
-        area, cx, cy = _ring_metrics(ring, lat0)
+        area = area2 / 2.0
         total += area
-        wx += cx * area
-        wy += cy * area
+        wx += (cx / (3.0 * area2)) * area
+        wy += (cy / (3.0 * area2)) * area
     if total == 0:
         return None
     return abs(total), (wx / total, wy / total)
 
 
-def geometry_equivalence(features_a: dict[str, dict], features_b: dict[str, dict],
+def _point_segment_distance_sq(px, py, ax, ay, bx, by) -> float:
+    dx, dy = bx - ax, by - ay
+    if dx == 0.0 and dy == 0.0:
+        return (px - ax) ** 2 + (py - ay) ** 2
+    t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)
+    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+    qx, qy = ax + t * dx, ay + t * dy
+    return (px - qx) ** 2 + (py - qy) ** 2
+
+
+def _directed_boundary_distance(vertices, segments, cutoff_sq: float) -> float:
+    """Greatest distance from any vertex of one boundary to the other boundary.
+
+    Stops early per vertex once a segment is within the cutoff, which is the
+    common case for two renderings of the same boundary, and stops entirely
+    once the running maximum has already exceeded the cutoff.
+    """
+    worst = 0.0
+    for px, py in vertices:
+        best = float("inf")
+        for ax, ay, bx, by, minx, maxx, miny, maxy in segments:
+            if best < cutoff_sq:
+                break
+            # Cheap rejection before the projection arithmetic.
+            if px < minx - best ** 0.5 or px > maxx + best ** 0.5:
+                if py < miny - best ** 0.5 or py > maxy + best ** 0.5:
+                    continue
+            d = _point_segment_distance_sq(px, py, ax, ay, bx, by)
+            if d < best:
+                best = d
+        if best > worst:
+            worst = best
+            if worst > cutoff_sq * 4:
+                # Already far outside any tolerance; the exact value adds
+                # nothing to the decision.
+                return math.sqrt(worst)
+    return math.sqrt(worst)
+
+
+def _projected(rings, mx, my):
+    verts = []
+    segs = []
+    for ring in rings:
+        pts = [(x * mx, y * my) for x, y in ring]
+        verts.extend(pts)
+        for i in range(len(pts) - 1):
+            ax, ay = pts[i]
+            bx, by = pts[i + 1]
+            segs.append((ax, ay, bx, by, min(ax, bx), max(ax, bx),
+                         min(ay, by), max(ay, by)))
+    return verts, segs
+
+
+def footprint_disagreement(geom_a: dict | None, geom_b: dict | None,
+                           cutoff_metres: float) -> dict[str, Any] | None:
+    """Measure how far two published footprints actually differ.
+
+    Area and centroid are reported, but they cannot decide anything on their
+    own: a square and an equal-area diamond about the same point agree on both
+    while describing different ground. The figure that reflects the footprint
+    is ``boundary_distance_metres``, the greatest distance from either
+    boundary's vertices to the other boundary.
+    """
+    rings_a, rings_b = rings_of(geom_a), rings_of(geom_b)
+    if not rings_a or not rings_b:
+        return None
+    lat0 = rings_a[0][0][1]
+    mx, my = _scales(lat0)
+
+    ma = geometry_metrics(geom_a, lat0)
+    mb = geometry_metrics(geom_b, lat0)
+    if ma is None or mb is None:
+        return None
+    area_a, (cax, cay) = ma
+    area_b, (cbx, cby) = mb
+
+    verts_a, segs_a = _projected(rings_a, mx, my)
+    verts_b, segs_b = _projected(rings_b, mx, my)
+    cutoff_sq = cutoff_metres ** 2
+    forward = _directed_boundary_distance(verts_a, segs_b, cutoff_sq)
+    backward = _directed_boundary_distance(verts_b, segs_a, cutoff_sq)
+
+    denom = max(area_a, area_b)
+    return {
+        "relative_area_difference": abs(area_a - area_b) / denom if denom else 0.0,
+        "centroid_shift_metres": math.hypot(cax - cbx, cay - cby),
+        "boundary_distance_metres": max(forward, backward),
+        "vertices_a": len(verts_a),
+        "vertices_b": len(verts_b),
+    }
+
+
+def footprint_comparison(features_a: dict[str, dict], features_b: dict[str, dict],
                          level: str, boundary_release_a: str,
                          boundary_release_b: str,
                          tolerances: dict[str, float] | None = None
                          ) -> GeographyEvidence:
-    """Compare two vintages' polygons for the areas they share.
+    """Compare the published footprints of the areas two vintages share.
 
-    Only the shared identifiers are compared: areas present in one release
-    alone are excluded from the comparison elsewhere and are not evidence of
-    anything here.  The documented rule and its tolerances live in
-    ``config/geography_equivalence.json``.
+    This never returns established evidence. It is a measurement: it can show
+    that two renderings disagree, which is decisive, but agreeing within a
+    tolerance does not by itself establish that the provider defines them as
+    the same area. That still needs the provider's own correspondence or a
+    scoped human review.
     """
     rule = equivalence_rule()
-    tol = dict(rule["tolerances"])
+    tol = dict(rule["footprint_comparison"]["tolerances"])
     if tolerances:
         tol.update(tolerances)
     max_area = float(tol["max_relative_area_difference"])
-    max_shift = float(tol["max_centroid_shift_metres"])
+    max_boundary = float(tol["max_boundary_distance_metres"])
 
     shared = sorted(set(features_a) & set(features_b))
     if not shared:
         return GeographyEvidence.none(
             level, boundary_release_a, boundary_release_b,
-            "the two releases share no areas at this level, so equivalence "
-            "cannot be established")
+            "the two releases share no areas at this level, so there is nothing "
+            "to compare")
 
-    worst_area = 0.0
-    worst_shift = 0.0
+    worst = {"relative_area_difference": 0.0, "centroid_shift_metres": 0.0,
+             "boundary_distance_metres": 0.0}
     failing: list[str] = []
+    agreeing: list[str] = []
     uncomparable: list[str] = []
 
     for geoid in shared:
-        ma = geometry_metrics(features_a[geoid].get("geometry"))
-        mb = geometry_metrics(features_b[geoid].get("geometry"))
-        if ma is None or mb is None:
+        m = footprint_disagreement(features_a[geoid].get("geometry"),
+                                   features_b[geoid].get("geometry"), max_boundary)
+        if m is None:
             uncomparable.append(geoid)
             continue
-        area_a, (cax, cay) = ma
-        area_b, (cbx, cby) = mb
-        denom = max(area_a, area_b)
-        rel = abs(area_a - area_b) / denom if denom else 0.0
-        shift = math.hypot(cax - cbx, cay - cby)
-        worst_area = max(worst_area, rel)
-        worst_shift = max(worst_shift, shift)
-        if rel > max_area or shift > max_shift:
+        for key in worst:
+            worst[key] = max(worst[key], m[key])
+        if (m["relative_area_difference"] > max_area
+                or m["boundary_distance_metres"] > max_boundary):
             failing.append(geoid)
+        else:
+            agreeing.append(geoid)
 
-    if uncomparable:
-        return GeographyEvidence(
-            kind="computed_geometry", established=False, level=level,
-            boundary_release_a=boundary_release_a,
-            boundary_release_b=boundary_release_b,
-            areas_compared=len(shared) - len(uncomparable),
-            detail=(f"{len(uncomparable)} shared area(s) have no usable geometry in "
-                    "one of the two releases, so equivalence cannot be computed"),
-            failing_areas=uncomparable,
-            source="computed from the cached cartographic boundary files",
-        )
-
-    established = not failing
-    if established:
-        detail = (
-            f"all {len(shared)} shared {level} areas match between "
-            f"{boundary_release_a} and {boundary_release_b} within the documented "
-            f"tolerance (worst relative area difference {worst_area:.6f} of "
-            f"{max_area}, worst centroid shift {worst_shift:.1f} m of {max_shift} m). "
-            "Differences inside the tolerance are treated as cartographic "
-            "generalisation, not as demographic change."
-        )
-    else:
-        detail = (
-            f"{len(failing)} of {len(shared)} shared {level} areas differ beyond the "
-            f"documented tolerance between {boundary_release_a} and "
-            f"{boundary_release_b} (worst relative area difference {worst_area:.6f}, "
-            f"worst centroid shift {worst_shift:.1f} m). A shared identifier is not "
-            "evidence that these are the same area; a reviewed equivalence record or "
-            "a validated harmonisation is required."
-        )
+    detail = (
+        f"Footprint comparison of {len(agreeing) + len(failing)} shared {level} "
+        f"area(s) between {boundary_release_a} and {boundary_release_b}: "
+        f"{len(agreeing)} agree within the measurement tolerance "
+        f"(relative area {max_area}, boundary distance {max_boundary} m) and "
+        f"{len(failing)} do not. Worst observed: relative area "
+        f"{worst['relative_area_difference']:.6f}, boundary distance "
+        f"{worst['boundary_distance_metres']:.1f} m, centroid shift "
+        f"{worst['centroid_shift_metres']:.1f} m."
+        + (f" {len(uncomparable)} area(s) had no usable geometry."
+           if uncomparable else "")
+        + " This is a measurement, not an establishment of equivalence: two "
+          "renderings agreeing within a tolerance does not show that the "
+          "provider defines them as the same area. Record documented provider "
+          "correspondence or a scoped review in "
+          "config/geography_equivalence.json to allow the comparison."
+    )
 
     return GeographyEvidence(
-        kind="computed_geometry", established=established, level=level,
-        boundary_release_a=boundary_release_a, boundary_release_b=boundary_release_b,
-        detail=detail, areas_compared=len(shared),
-        max_relative_area_difference=worst_area,
-        max_centroid_shift_metres=worst_shift,
+        kind=FOOTPRINT_COMPARISON,
+        established=False,
+        level=level,
+        boundary_release_a=boundary_release_a,
+        boundary_release_b=boundary_release_b,
+        detail=detail,
+        areas_compared=len(agreeing) + len(failing),
+        measurements={
+            "worst": worst,
+            "tolerances": {"max_relative_area_difference": max_area,
+                           "max_boundary_distance_metres": max_boundary},
+            "agreeing_area_count": len(agreeing),
+            "disagreeing_area_count": len(failing),
+            "uncomparable_area_count": len(uncomparable),
+            "method": ("greatest distance from either boundary's vertices to the "
+                       "other boundary, computed on the published cartographic "
+                       "geometry with a shared projection origin"),
+            "limitation": ("vertex-to-boundary distance is a lower bound on the "
+                           "true Hausdorff distance between the boundaries; it is "
+                           "close for densely sampled published polygons"),
+        },
         failing_areas=failing,
-        # Only the areas whose polygons were actually compared and matched. An
-        # observation with no boundary in either vintage was not verified and
-        # must not inherit the verdict.
-        established_areas=sorted(set(shared) - set(failing)),
+        established_areas=[],
         source="computed from the cached cartographic boundary files",
     )
 
 
-def reviewed_equivalence(level: str, boundary_release_a: str,
+def recorded_equivalence(level: str, boundary_release_a: str,
                          boundary_release_b: str) -> GeographyEvidence | None:
-    """Look for a human-reviewed equivalence record covering this pair."""
-    for record in equivalence_rule().get("reviewed_equivalences", []):
-        pair = {record.get("boundary_release_a"), record.get("boundary_release_b")}
-        if record.get("level") == level and pair == {boundary_release_a,
-                                                     boundary_release_b}:
+    """Documented provider correspondence, or a scoped human review.
+
+    These are the only computed-free routes to establishing equivalence, and
+    the repository ships none of them: a record has to be added deliberately,
+    citing what it rests on.
+    """
+    rule = equivalence_rule()
+    for key, kind in (("provider_correspondence", PROVIDER_CORRESPONDENCE),
+                      ("reviewed_equivalences", REVIEWED_RECORD)):
+        for record in rule.get(key, []):
+            pair = {record.get("boundary_release_a"), record.get("boundary_release_b")}
+            if record.get("level") != level or pair != {boundary_release_a,
+                                                        boundary_release_b}:
+                continue
+            areas = record.get("established_areas")
             return GeographyEvidence(
-                kind="reviewed_record", established=bool(record.get("established")),
+                kind=kind, established=bool(record.get("established")),
                 level=level, boundary_release_a=boundary_release_a,
                 boundary_release_b=boundary_release_b,
-                detail=(f"reviewed by {record.get('reviewer', 'unnamed reviewer')} on "
-                        f"{record.get('reviewed_on', 'an unrecorded date')}: "
-                        f"{record.get('evidence', 'no evidence recorded')}"),
-                source="config/geography_equivalence.json",
-            )
+                detail=(f"{record.get('summary', 'no summary recorded')} "
+                        f"[source: {record.get('source', 'none recorded')}; "
+                        f"recorded by {record.get('recorded_by', 'unnamed')} on "
+                        f"{record.get('recorded_on', 'an unrecorded date')}]"),
+                established_areas=(None if areas in (None, "all") else list(areas)),
+                source="config/geography_equivalence.json")
     return None
 
+
+# ---------------------------------------------------------------------------
+# Identifiers and joins
+# ---------------------------------------------------------------------------
 
 def split_geo_id(geo_id: str) -> tuple[str, str]:
     """Split a full ``GEO_ID`` into (summary level, GEOID string)."""

@@ -9,6 +9,7 @@ suites they also belong to.
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import unittest
 from pathlib import Path
@@ -280,41 +281,80 @@ class BoundaryEvidenceTests(unittest.TestCase):
 
     def test_evidence_for_the_wrong_level_does_not_count(self):
         evidence = compare.GeographyEvidence(
-            kind="computed_geometry", established=True, level="county",
+            kind=geography.PROVIDER_CORRESPONDENCE, established=True, level="county",
             boundary_release_a="GENZ2023", boundary_release_b="GENZ2022",
-            detail="county geometry compared")
+            detail="county correspondence recorded")
         report = compare.check(A, B, "tract", {"36005000100"}, {"36005000100"},
                                geography_evidence=evidence)
         self.assertFalse(report.allowed)
         self.assertTrue(any("tract" in b for b in report.blocking))
 
-    def test_geometry_that_moved_beyond_tolerance_is_not_established(self):
-        a = {"36005000100": _feature("36005000100", square(-73.9, 40.8, 0.10))}
-        b = {"36005000100": _feature("36005000100", square(-73.5, 40.8, 0.10))}
-        evidence = geography.geometry_equivalence(
+    def test_a_footprint_comparison_never_establishes_equivalence_by_itself(self):
+        """Measuring that two polygons look alike is not knowing they are the same area."""
+        ring = square(-73.9, 40.8, 0.10)
+        a = {"36005000100": _feature("36005000100", ring)}
+        b = {"36005000100": _feature("36005000100", list(ring))}
+        evidence = geography.footprint_comparison(
+            a, b, "tract", "GENZ2023", "GENZ2022")
+        self.assertFalse(evidence.established,
+                         "identical polygons still do not establish equivalence")
+        self.assertEqual(evidence.measurements["agreeing_area_count"], 1)
+        self.assertIn("not an establishment of equivalence", evidence.detail)
+
+    def test_equal_area_and_centroid_do_not_hide_a_different_footprint(self):
+        """A square and an equal-area diamond share area and centroid.
+
+        Summary statistics alone would call these the same area. The boundary
+        distance is what reflects the footprint, and it does not.
+        """
+        cx, cy, s = -74.0, 40.7, 0.02
+        square_ring = [(cx - s, cy - s), (cx - s, cy + s),
+                       (cx + s, cy + s), (cx + s, cy - s)]
+        d = s * math.sqrt(2)
+        diamond_ring = [(cx, cy - d), (cx + d, cy), (cx, cy + d), (cx - d, cy)]
+        a = {"36005000100": _feature("36005000100", square_ring)}
+        b = {"36005000100": _feature("36005000100", diamond_ring)}
+
+        m = geography.footprint_disagreement(
+            a["36005000100"]["geometry"], b["36005000100"]["geometry"], 25.0)
+        self.assertLess(m["relative_area_difference"], 1e-6,
+                        "fixture precondition: the areas match")
+        self.assertLess(m["centroid_shift_metres"], 1.0,
+                        "fixture precondition: the centroids match")
+        self.assertGreater(m["boundary_distance_metres"], 100.0,
+                           "the footprints plainly differ and the measure must say so")
+
+        evidence = geography.footprint_comparison(
             a, b, "tract", "GENZ2023", "GENZ2022")
         self.assertFalse(evidence.established)
         self.assertIn("36005000100", evidence.failing_areas)
 
-    def test_identical_geometry_establishes_equivalence(self):
+    def test_a_computed_comparison_cannot_unblock_a_cross_vintage_comparison(self):
         ring = square(-73.9, 40.8, 0.10)
         a = {"36005000100": _feature("36005000100", ring)}
         b = {"36005000100": _feature("36005000100", list(ring))}
-        evidence = geography.geometry_equivalence(
+        evidence = geography.footprint_comparison(
             a, b, "tract", "GENZ2023", "GENZ2022")
-        self.assertTrue(evidence.established)
-        self.assertEqual(evidence.failing_areas, [])
+        report = compare.check(A, B, "tract", {"36005000100"}, {"36005000100"},
+                               measure=SHARE, geography_evidence=evidence)
+        self.assertFalse(report.allowed)
+        self.assertEqual(report.comparable_geoids, [])
 
-    def test_a_cartographic_nudge_inside_tolerance_is_documented_not_ignored(self):
-        ring = square(-73.9, 40.8, 0.10)
-        moved = [(x + 0.000005, y) for x, y in ring]
-        a = {"36005000100": _feature("36005000100", ring)}
-        b = {"36005000100": _feature("36005000100", moved)}
-        evidence = geography.geometry_equivalence(
-            a, b, "tract", "GENZ2023", "GENZ2022")
-        self.assertTrue(evidence.established)
-        self.assertGreater(evidence.max_centroid_shift_metres, 0.0)
-        self.assertIn("tolerance", evidence.detail.lower())
+    def test_recorded_provider_correspondence_does_establish_equivalence(self):
+        evidence = geography.GeographyEvidence(
+            kind=geography.PROVIDER_CORRESPONDENCE, established=True, level="tract",
+            boundary_release_a="GENZ2023", boundary_release_b="GENZ2022",
+            detail="provider states the areas correspond", established_areas=None)
+        report = compare.check(A, B, "tract", {"36005000100"}, {"36005000100"},
+                               geography_evidence=evidence)
+        self.assertNotIn("boundary vintage",
+                         " ".join(report.blocking).lower())
+
+    def test_the_shipped_configuration_records_no_equivalence(self):
+        """The repository must not ship an invented review."""
+        rule = geography.equivalence_rule()
+        self.assertEqual(rule["provider_correspondence"], [])
+        self.assertEqual(rule["reviewed_equivalences"], [])
 
     def test_non_shared_areas_are_excluded_from_the_comparison_set(self):
         evidence = compare.GeographyEvidence.same_vintage("county", "GENZ2023")

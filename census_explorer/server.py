@@ -202,8 +202,9 @@ class ServiceState:
                            ) -> geography_mod.GeographyEvidence:
         """Evidence that two releases' areas are the same ground.
 
-        Same vintage needs none. Otherwise a reviewed record wins if one
-        exists, and failing that the two vintages' polygons are compared.
+        Same vintage needs none. Otherwise only a recorded provider
+        correspondence or a scoped review counts; the service never computes
+        its way to an answer here.
         """
         ra, rb = self.release(a), self.release(b)
         if ra.boundary_release == rb.boundary_release:
@@ -211,21 +212,14 @@ class ServiceState:
         key = (a, b, level)
         with self._lock:
             if key not in self._evidence:
-                reviewed = geography_mod.reviewed_equivalence(
+                recorded = geography_mod.recorded_equivalence(
                     level, ra.boundary_release, rb.boundary_release)
-                if reviewed is not None:
-                    self._evidence[key] = reviewed
-                else:
-                    try:
-                        fa = self.geography_features(a, level)
-                        fb = self.geography_features(b, level)
-                    except FileNotFoundError as exc:
-                        return geography_mod.GeographyEvidence.none(
-                            level, ra.boundary_release, rb.boundary_release,
-                            f"the boundary layers needed to compare vintages are not "
-                            f"built ({exc})")
-                    self._evidence[key] = geography_mod.geometry_equivalence(
-                        fa, fb, level, ra.boundary_release, rb.boundary_release)
+                self._evidence[key] = recorded or geography_mod.GeographyEvidence.none(
+                    level, ra.boundary_release, rb.boundary_release,
+                    "no documented provider correspondence and no scoped review "
+                    "cover this pair of boundary vintages at this level. Comparing "
+                    "the published polygons can inform such a review "
+                    "(`cli geography footprint`) but cannot take its place.")
             return self._evidence[key]
 
 

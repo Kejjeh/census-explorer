@@ -136,14 +136,14 @@ class CompatibilityTests(unittest.TestCase):
 
     def test_a_differing_boundary_vintage_is_allowed_with_established_evidence(self):
         evidence = compare.GeographyEvidence(
-            kind="computed_geometry", established=True, level="county",
+            kind=compare.PROVIDER_CORRESPONDENCE, established=True, level="county",
             boundary_release_a="GENZ2023", boundary_release_b="GENZ2022",
-            detail="polygons compared and identical within tolerance",
+            detail="provider documents that these areas correspond",
             areas_compared=len(GEO))
         r = checked(A, B, evidence=evidence)
         self.assertTrue(r.allowed, r.blocking)
         self.assertEqual(set(r.comparable_geoids), GEO)
-        self.assertEqual(r.geography_evidence["kind"], "computed_geometry")
+        self.assertEqual(r.geography_evidence["kind"], compare.PROVIDER_CORRESPONDENCE)
 
     def test_the_evidence_travels_in_the_report(self):
         r = checked(A, A.__class__(**{**A.__dict__, "release_id": "other"}))

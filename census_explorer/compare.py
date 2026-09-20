@@ -18,7 +18,11 @@ from pathlib import Path
 from typing import Any
 
 from .config import Release
-from .geography import GeographyEvidence
+from .geography import (PROVIDER_CORRESPONDENCE, REVIEWED_RECORD,
+                        GeographyEvidence)
+
+#: The evidence kinds a human or a provider put there deliberately.
+RECORDED_EVIDENCE_KINDS = (PROVIDER_CORRESPONDENCE, REVIEWED_RECORD)
 from .metadata import ReleaseMetadata
 
 BLOCK = "blocking"
@@ -297,13 +301,14 @@ def check(a: Release, b: Release, level: str,
     record("boundary_vintage_equivalence", evidence.established,
            f"geographic comparability across boundary vintages "
            f"{a.boundary_release} and {b.boundary_release} at {level} level has not "
-           f"been established: {evidence.detail}. A shared GEOID is not evidence "
-           "that two releases describe the same area.",
+           f"been established: {evidence.detail} A shared GEOID is not evidence "
+           "that two releases describe the same area, and neither is a computed "
+           "resemblance between two published polygons.",
            ok_detail=evidence.detail)
-    if evidence.established and evidence.kind == "computed_geometry":
+    if evidence.established and evidence.kind in RECORDED_EVIDENCE_KINDS:
         r.disclosures.append(
-            f"Areas were matched across boundary vintages by comparing the two "
-            f"vintages' polygons: {evidence.detail}")
+            f"Areas were matched across boundary vintages on recorded evidence: "
+            f"{evidence.detail}")
 
     if not evidence.established:
         r.comparable_geoids = []

@@ -16,10 +16,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from . import (compare as compare_mod, config as config_mod, dataset as dataset_mod,
-               fixtures as fixtures_mod, http_client, metadata as metadata_mod,
+               fixtures as fixtures_mod, geography as geography_mod, http_client,
+               metadata as metadata_mod,
                pipeline, projects as projects_mod, provenance, reconcile as reconcile_mod,
                server as server_mod, snapshot as snapshot_mod)
 from .redact import redact
@@ -118,6 +120,19 @@ def build_parser() -> argparse.ArgumentParser:
                          "exactly this selection")
     ex.add_argument("--figure", choices=("map", "chart", "none"), default="map")
     ex.add_argument("--data-dir", default="data/processed")
+
+    # geography -----------------------------------------------------------
+    geo = sub.add_parser(
+        "geography", help="offline geographic analysis")
+    gsub = geo.add_subparsers(dest="geo_action", required=True)
+    fp = gsub.add_parser(
+        "footprint",
+        help="measure how far two vintages' published footprints differ "
+             "(a measurement to inform a review; it does not establish equivalence)")
+    fp.add_argument("--a", required=True)
+    fp.add_argument("--b", required=True)
+    fp.add_argument("--level", choices=LEVELS, default="county")
+    fp.add_argument("--data-dir", default="data/processed")
 
     # reconcile -----------------------------------------------------------
     rc = sub.add_parser(
@@ -329,6 +344,36 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
             }
         result = server_mod.run_export(st, payload)
         log(json.dumps(result, indent=2))
+        return 0
+
+    if args.command == "geography":
+        st = server_mod.ServiceState(root, args.data_dir)
+        ra, rb = st.release(args.a), st.release(args.b)
+        log(f"Comparing published {args.level} footprints: "
+            f"{ra.boundary_release} vs {rb.boundary_release}")
+        started = time.time()
+        evidence = geography_mod.footprint_comparison(
+            st.geography_features(args.a, args.level),
+            st.geography_features(args.b, args.level),
+            args.level, ra.boundary_release, rb.boundary_release)
+        elapsed = time.time() - started
+        doc = {
+            "computed_at": provenance.utc_now(),
+            "code_revision": provenance.code_revision(root),
+            "release_a": ra.to_json(), "release_b": rb.to_json(),
+            "level": args.level,
+            "seconds": round(elapsed, 1),
+            "evidence": evidence.to_json(),
+        }
+        out = (root / "data/processed"
+               / f"footprint_{args.a}_{args.b}_{args.level}.json")
+        provenance.write_json(out, doc)
+        log(json.dumps(doc["evidence"], indent=2))
+        log(f"\ncomputed in {elapsed:.1f}s; written to {out.relative_to(root)}")
+        log("\nThis is a measurement. It does not establish that the two releases "
+            "describe the same areas, and the comparison stays blocked until "
+            "documented provider correspondence or a scoped review is recorded in "
+            "config/geography_equivalence.json.")
         return 0
 
     if args.command == "reconcile":
