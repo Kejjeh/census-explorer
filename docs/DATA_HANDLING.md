@@ -56,7 +56,9 @@ Every source value is classified before anything arithmetic happens to it:
 
 Only `ok` carries a value. An undocumented nine-digit negative repunit (say
 `-444444444`) is refused as `unparseable` rather than used, on the assumption
-that it is a new annotation rather than a measurement.
+that it is a new annotation rather than a measurement. `NaN`, `Infinity` and
+their variants are refused too: `float()` accepts all of them, and one reaching
+a sum, a class break or an exported cell would corrupt it silently.
 
 ### The one arithmetic exception, stated openly
 
@@ -173,6 +175,74 @@ Both releases currently match exactly on all six checked cells:
 A mismatch is reported with its size and fails the command. It is never
 absorbed.
 
+## Boundary-vintage equivalence
+
+Two releases may only be compared area by area when the areas are established
+to be the same ground. A shared GEOID is not that evidence: identifiers are
+reused across vintages even when a boundary moves.
+
+The rule, its tolerances and any reviewed records live in
+`config/geography_equivalence.json`:
+
+- **Same boundary vintage** — equivalence holds by construction.
+- **Different vintages** — equivalence must be established either by computed
+  geometry evidence (every shared area's polygons compared between the two
+  cached boundary files, all within tolerance) or by a reviewed equivalence
+  record naming both vintages, the level, the evidence, the reviewer and the
+  date.
+- **Neither** — the comparison is blocked.
+
+The tolerances are 0.1% of area and 25 metres of centroid movement. A
+difference inside them is recorded as a cartographic generalisation difference
+and reported; it is not treated as demographic change. A difference outside
+them blocks until a human looks at it. Neither branch assumes an equal
+identifier means a stable area.
+
+An area that lacks geometry in either vintage is not comparable even when both
+releases publish an observation for it, and is excluded and listed.
+
+### What this found in the current NYC build
+
+| Level | Areas compared | Worst area difference | Worst centroid shift | Verdict |
+| --- | --- | --- | --- | --- |
+| County | 5 | 0.000594 (0.06%) | 5.1 m | established |
+| Tract | 2,324 | 0.0733 (7.3%) | 344.1 m | **not established**, 71 areas fail |
+
+So the borough comparison is drawn on computed evidence, and the tract
+comparison is refused. The 71 failing tracts are mostly small waterfront areas
+whose median size is 0.72 km²; the differences are plausibly cartographic, but
+plausibility is not evidence. To enable the tract comparison, examine them and
+add a record to `config/geography_equivalence.json`. Widening the tolerance to
+make the check pass would defeat its purpose.
+
+## Semantic compatibility
+
+A comparison also has to mean the same thing in both releases, and this check
+cannot be skipped: if the inputs needed to perform it are unavailable, the
+comparison is refused rather than allowed on the strength of the checks that
+did run. No measure named, metadata not cached, or a cell absent from one
+release all block.
+
+Universes are compared **cell by cell**, not as sets. Two cells exchanging
+universes leaves the set of universes unchanged while changing what the measure
+computes.
+
+A published label that changed is classified, not merely reported:
+
+- If normalising case, whitespace, a trailing colon, hyphen-versus-space,
+  typographic punctuation or abbreviation dots makes the two labels identical,
+  it is a restyling a human has already reviewed. It is allowed and disclosed.
+  `config/label_semantics.json` records which restylings those are and when
+  they were reviewed.
+- If the exact change is listed under `reviewed_equivalences` in that file,
+  the reviewer's note is quoted and the comparison proceeds.
+- Otherwise it **blocks**. `B05002_013` going from `Foreign-born` to
+  `Foreign born` is the first kind. A cell relabelled to a different concept is
+  the second, and no amount of disclosure makes it comparable.
+
+Every requested measure is validated, not only the first, so an incompatible
+measure cannot ride along with a compatible one in an export.
+
 ## Comparison rules
 
 | Situation | Behaviour |
@@ -194,6 +264,66 @@ The default comparison, 2019-2023 ACS against 2018-2022 ACS, shares four years.
 The interface prints that fact above the maps, the export records it in
 `provenance.json`, and the figure prints it under the chart.
 
+## One selection, every output
+
+The table, both map panels, the chart, the CSV and the provenance document are
+built from a single `Selection`, resolved and validated once: the releases, the
+level, the measures, the exact areas and the class breaks. An export of one
+borough produces a figure of one borough. A comparison export renders both
+periods on the shared breaks and prints the overlap disclosure, rather than
+showing the primary panel alone.
+
+When a comparison is active the selection narrows to the areas the comparison
+is actually allowed to use, so "areas present in only one release are excluded"
+is true of the data and the figure, not only of the sentence.
+
+A chart with one row per area stops being readable long before a city's worth
+of tracts, so above 25 rows it draws the highest-ranked and says so on the
+figure and on screen. The exported CSV always contains every selected area.
+
+## Pinned inputs and replay
+
+A saved project records the content digests of the exact files it was built
+from — the measure values, the geometry, the dataset's measure definitions and
+universes, and the retrieval manifests behind them — together with the measure
+and release definitions as they were at the time.
+
+Recording a manifest identifier alone would not have protected anything:
+identifiers stay the same while bytes move underneath them. The digests are
+what make the promise real.
+
+Reopening a project verifies every pinned input first. If one is missing or its
+content has changed, replay and export stop with a message naming the file, the
+pinned digest and the current one. Nothing is re-fetched and nothing is
+substituted. The remedy is stated: restore the files, or open the view you want
+now and re-save.
+
+Replay also uses the project's own pinned definitions rather than the current
+catalog, so editing a measure in `config/measures.json` cannot silently change
+what an older project means.
+
+`project verify --id <id>` runs the same check from the command line.
+
+## Output containment and request hardening
+
+Export bundles are written only inside `artifacts/`. The bundle name must be a
+single path component of ordinary characters; anything with a separator, a
+parent reference, a drive letter, a NUL or a Windows reserved device name is
+refused rather than sanitised, and the resolved destination is checked to be
+inside `artifacts/` before anything is created. The check runs again inside
+`write_bundle`, so a caller that builds a path another way cannot escape
+either.
+
+Release identifiers, measure identifiers and geography levels that become part
+of a file path are validated before use, and the static file handler tests
+containment with `Path.is_relative_to` rather than a string prefix.
+
+State-changing requests must carry `Content-Type: application/json`, which a
+cross-origin page cannot set without a CORS preflight this service never
+answers, and their `Origin` must be this service's own if one is present. A
+loopback `Host` header alone would not have stopped a cross-origin simple POST
+to localhost.
+
 ## Provenance
 
 Every retrieved artifact has a manifest record: provider, kind, sanitized
@@ -203,10 +333,12 @@ reports checksum, size and existence failures. A saved project pins the
 manifest identifiers it was built from, so refreshing the cache cannot silently
 change an older figure.
 
-Every export bundle carries `data.csv`, `provenance.json` (releases, measure
-definitions with cells and universes, all manifests, join accounting,
-diagnostics and any comparison rules that applied), `figure.svg` and a
-`README.txt` explaining how to read the columns.
+Every export bundle carries `data.csv`, `provenance.json` and `figure.svg` with
+a `README.txt` explaining how to read the columns. The provenance document
+lists the selection that produced the bundle and the digest of every file it
+was computed from — and only those files. Sweeping in every manifest in the
+directory, as an earlier version did, attached retrievals the export never read
+and made the bundle look better attested than it was.
 
 ## Credentials
 

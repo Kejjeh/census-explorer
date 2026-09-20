@@ -114,7 +114,7 @@ python -m unittest discover -s tests -t .
 ```
 
 ```
-Ran 130 tests in 6.2s
+Ran 174 tests in 8.0s
 OK (skipped=3)
 ```
 
@@ -132,6 +132,11 @@ The three skips are the live smoke tests, which are opt-in. Coverage by concern:
 | Configuration validation, saved projects and schema versioning | `tests/test_config_and_projects.py` |
 | Credential redaction in logs, manifests, errors and every endpoint | `tests/test_redaction.py` |
 | Build → service → project replay → export, over real HTTP | `tests/test_end_to_end.py` |
+| Pinned replay: changed values, changed definitions, changed geometry, missing inputs, exact replay | `tests/test_review_regressions.py` |
+| Boundary-vintage evidence: missing, wrong level, moved geometry, identical geometry | `tests/test_review_regressions.py` |
+| Semantic drift: substantive label change, reviewed restyling, per-cell universe swap, missing metadata | `tests/test_review_regressions.py` |
+| Export scope matching the figure; multi-measure validation | `tests/test_review_regressions.py` |
+| Output-path containment and cross-origin POST refusal | `tests/test_review_regressions.py` |
 
 ### Cache integrity
 
@@ -163,13 +168,72 @@ python -m census_explorer.cli verify catalog --release acs5_2023
 
 ### Comparison compatibility
 
+`--measure` is required: semantic compatibility cannot be established without
+one, and a check that cannot run blocks rather than being skipped.
+
 ```powershell
-python -m census_explorer.cli compare --a acs5_2023 --b acs5_2022 --level tract --measure foreign_born_share
+python -m census_explorer.cli compare --a acs5_2023 --b acs5_2022 --level county --measure foreign_born_share
 ```
 
-Reports `"allowed": true`, `"shared_geoids": 2327`, `"independent_observations": false`,
-and the disclosure naming the four shared years. Comparing a five-year release
-with a one-year release is blocked instead.
+```json
+{
+  "allowed": true,
+  "semantic_verified": true,
+  "shared_geoids": 5,
+  "comparable_geoid_count": 5,
+  "independent_observations": false,
+  "geography_evidence": {
+    "kind": "computed_geometry",
+    "established": true,
+    "areas_compared": 5,
+    "max_relative_area_difference": 0.000594,
+    "max_centroid_shift_metres": 5.1
+  }
+}
+```
+
+The same command at `--level tract` exits non-zero and reports:
+
+```
+geographic comparability across boundary vintages GENZ2023 and GENZ2022 at
+tract level has not been established: 71 of 2324 shared tract areas differ
+beyond the documented tolerance (worst relative area difference 0.073280,
+worst centroid shift 344.1 m). A shared identifier is not evidence that these
+are the same area; a reviewed equivalence record or a validated harmonisation
+is required.
+```
+
+That is the intended outcome, not a failure of the command. See
+`DATA_HANDLING.md` for the rule and what to do about it.
+
+Comparing a five-year release with a one-year release is blocked for a
+different reason, and a substantive label change blocks for a third.
+
+### Saved projects
+
+```powershell
+python -m census_explorer.cli project list
+python -m census_explorer.cli project verify --id nyc-foreign-born-boroughs
+```
+
+```
+8 pinned input(s): OK
+```
+
+`verify` exits non-zero and names the file if any pinned input has changed or
+gone missing. Reopening such a project in the browser is refused with the same
+message rather than showing different numbers.
+
+### Scoped export
+
+```powershell
+python -m census_explorer.cli export --release acs5_2023 --measure foreign_born_share `
+  --level county --areas 36005,36047 --figure chart
+```
+
+The CSV and the figure cover the same two boroughs. Adding
+`--compare-with acs5_2022` produces a two-panel map on shared class breaks with
+the overlap disclosure printed on the figure.
 
 ## 6. The live smoke test (separate and opt-in)
 

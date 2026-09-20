@@ -19,8 +19,9 @@ no telemetry, and the local service holds no credentials.
 | Matching-vintage Census polygons, string GEOIDs, join accounting | Working; boroughs and 2,324 tracts |
 | Local browser app: catalog, map, sortable table, detail drawer | Working |
 | Saved projects, CSV + provenance export, SVG figure export | Working |
-| Reviewed second period with linked comparison and shared cut points | Working, with the overlap disclosure enforced |
-| Offline test suite | Working: 130 tests, no network |
+| Second-period comparison, gated on evidence | Working at borough level. **Blocked at tract level**: 71 of 2,324 tracts fail the geometry-equivalence check between GENZ2022 and GENZ2023 |
+| Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
+| Offline test suite | Working: 174 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
@@ -129,10 +130,10 @@ Rules the code enforces:
 | `verify manifests` | no | Re-hash every cached artifact against its manifest |
 | `verify catalog` | no | Check every measure against the published release |
 | `catalog list \| show` | no | Search the catalog; show a measure's exact cells |
-| `compare --a --b` | no | Report whether two releases may be compared |
+| `compare --a --b --measure` | no | Report whether two releases may be compared, and why not |
 | `reconcile` | no | Re-run the comparison from the cache |
 | `export` | no | Write a CSV + provenance + figure bundle to `artifacts/` |
-| `project list \| show \| delete` | no | Saved project definitions |
+| `project list \| show \| verify \| delete` | no | Saved project definitions and their pinned inputs |
 | `fixtures build` | no | Build the synthetic fixture dataset |
 | `serve` | no | Run the local browser application on loopback |
 
@@ -144,11 +145,12 @@ start-up.
 ## Verify the build
 
 ```powershell
-python -m unittest discover -s tests -t .          # 130 offline tests
+python -m unittest discover -s tests -t .          # 174 offline tests
 python -m census_explorer.cli verify manifests     # re-hash the raw cache
 python -m census_explorer.cli verify catalog       # cells vs the published release
 python -m census_explorer.cli reconcile --release acs5_2023
-python -m census_explorer.cli compare --a acs5_2023 --b acs5_2022 --level tract --measure foreign_born_share
+python -m census_explorer.cli compare --a acs5_2023 --b acs5_2022 --level county --measure foreign_born_share
+python -m census_explorer.cli project verify --id <project-id>
 ```
 
 The live smoke test is opt-in and separate:
@@ -181,10 +183,26 @@ one rather than failing.
 - **Birthplace is a stock, not a flow.** No measure describes a place of birth
   as a recent arrival, and "born in state of residence" is labelled as New York
   *State*, never New York *City*.
-- **Comparisons are checked before they are drawn.** Different survey products
-  or period lengths are blocked. Overlapping five-year periods are allowed but
-  carry a mandatory disclosure that they are not independent observations, and
-  both panels share one set of class breaks.
+- **Comparisons are refused by default.** A comparison is drawn only when every
+  applicable check has actually run and passed. Different survey products or
+  period lengths are blocked. A comparison across boundary vintages is blocked
+  until equivalence is established, because a shared GEOID is not evidence that
+  two releases describe the same area. A published cell label that changed in a
+  way nobody has reviewed is blocked, not disclosed and drawn anyway. A check
+  that could not be performed — no measure named, metadata not cached — blocks
+  rather than being skipped. Overlapping five-year periods are allowed but carry
+  a mandatory disclosure that they are not independent observations, and both
+  panels share one set of class breaks.
+- **A saved project reproduces exactly, or refuses to open.** It pins the
+  content digests of the files it was built from — the measure values, the
+  geometry, the dataset's measure definitions and the retrieval manifests — and
+  replays from its own pinned definitions rather than the current catalog. If
+  any pinned input is missing or changed, replay and export stop with a message
+  naming the file. Nothing is re-fetched and nothing is substituted.
+- **One selection drives every output.** The table, both map panels, the chart,
+  the CSV and the provenance document are built from a single validated
+  selection, so an exported figure cannot cover areas the exported data does
+  not.
 - **Joins are accounted for.** GEOIDs are strings, duplicates are refused, and
   unmatched features and observations are reported by identifier and by
   population.
@@ -222,6 +240,14 @@ artifacts/           git-ignored: export bundles
 
 - Only NYC counties and tracts, and only the two ACS five-year releases listed
   in `config/project.json`, have been retrieved and validated.
+- **The tract-level comparison between 2019-2023 and 2018-2022 ACS is blocked.**
+  Comparing the two vintages' actual polygons, 71 of 2,324 shared tracts differ
+  beyond the documented tolerance (worst case: 7.3% of area, 344 m of centroid
+  movement). They are mostly small waterfront tracts and the differences may
+  well be cartographic, but nothing in the data says so, so the comparison waits
+  for a human to look at them and record a reviewed equivalence in
+  `config/geography_equivalence.json`. The borough-level comparison passes the
+  same check on computed geometry and is available.
 - The measure catalog is 47 measures across five tables. It is not a
   500,000-variable library and does not attempt platform parity.
 - The map uses local boundary layers and a simple equirectangular projection
