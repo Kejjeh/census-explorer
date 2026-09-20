@@ -123,6 +123,30 @@ def fmt_moe(value: float | None, unit: str) -> str:
     return f"±{value:,.0f}"
 
 
+def _reproducibility_paragraph(project_id: str | None) -> str:
+    """Say what this particular file can and cannot do.
+
+    A brief produced from a saved project is backed by a pin the application
+    verifies when the project is reopened. A brief opened straight from the
+    interface is a snapshot: the digests below record what it was computed
+    from, but the HTML file cannot check them, and nothing will notice if the
+    inputs move.
+    """
+    if project_id:
+        return ('<p style="font-size:12px">This brief was produced from the saved '
+                f'project <strong>{e(project_id)}</strong>, which pins the digest '
+                "of every file below. Reopening it in the app verifies those "
+                "digests and refuses if any has changed, naming the file. That is "
+                "a tamper check, not an archive: it does not keep a copy of the "
+                "data or restore an earlier version.</p>")
+    return ('<p style="font-size:12px">This is a generated snapshot, not a saved '
+            "project. The digests below record the files it was computed from, "
+            "but this HTML file cannot verify them and nothing here will notice "
+            "if those files change. Save the view as a project in the app to get "
+            "that check on reopening. Either way it is a tamper check, not an "
+            "archive: no copy of the data is kept.</p>")
+
+
 def _benchmark_row(benchmark: dict, unit: str) -> str:
     """One row for the reference, whether or not it could be built.
 
@@ -182,6 +206,23 @@ def _benchmark_note(benchmark: dict) -> str:
             + " ".join(e(p) for p in parts) + "</p>")
 
 
+def _universe_caption(measure: dict, summary: dict) -> str:
+    """Name the published source-table universe and the measure's denominator.
+
+    They are different things. A naturalisation share is computed out of the
+    foreign-born population while its source table's published universe is the
+    total population, and printing only the latter reads as a contradiction.
+    """
+    published = (measure.get("universe_published") or [None])[0] \
+        or measure.get("universe_note", "")
+    denominator = summary.get("denominator_phrase") or ""
+    if measure.get("unit") == "percent" and denominator:
+        return (f"Published source table universe: {e(published)}. "
+                f"Measure denominator: {e(denominator)}.")
+    return (f"Published source table universe: {e(published)}. "
+            "Measure denominator: not applicable, this is a count of people.")
+
+
 def _quality_panels(context: dict[str, Any]) -> str:
     """Three separate statements. No combined score."""
     unc = context["uncertainty"]
@@ -205,7 +246,8 @@ def build(*, question: dict, summary: dict, rows: list[dict], measure: dict,
           benchmark: dict | None, limitations: list[str],
           sources: list[str], reproducibility: dict,
           analyst_note: str = "", data_mode: str = "live",
-          generated_at: str = "") -> str:
+          generated_at: str = "", contents: str = "",
+          project_id: str | None = None) -> str:
     """Render the brief. Every value passed in came from the same selection."""
     unit = measure["unit"]
     banner = ""
@@ -272,13 +314,12 @@ def build(*, question: dict, summary: dict, rows: list[dict], measure: dict,
 
 <h2>What this brief shows</h2>
 <dl class="meta">{meta_rows}</dl>
-<p>{e(question['answers'])}</p>
+<p>{e(contents or question['answers'])}</p>
 {note_block}
 
 <h2>{e(measure['label'])}</h2>
 <div class="figure">{figure_svg}</div>
-<figcaption>{e(measure['definition_note'])} Universe: {e(measure['universe_published'][0]
-    if measure.get('universe_published') else measure['universe_note'])}.</figcaption>
+<figcaption>{e(measure['definition_note'])} {_universe_caption(measure, summary)}</figcaption>
 
 <table>
 <thead><tr><th scope="col">Area</th><th scope="col">Estimate</th>
@@ -303,10 +344,7 @@ unavailable, with the reason recorded in the exported data. It is never a zero.<
 <span class="repro">{e(reproducibility.get('manifest_id', 'unrecorded'))}</span>
 at code revision <span class="repro">{e(reproducibility.get('code_revision', 'unknown'))}</span>,
 data mode <strong>{e(data_mode)}</strong>, generated {e(generated_at)}.</p>
-<p style="font-size:12px">The saved brief records the digest of every file below.
-Reopening it checks them and refuses if any has changed, naming the file. That is a
-tamper check, not an archive: it does not keep a copy of the data or restore an
-earlier version.</p>
+{_reproducibility_paragraph(project_id)}
 <table class="repro-table">
 <colgroup><col class="role"><col class="file"><col class="hash"></colgroup>
 <thead><tr><th scope="col">Role</th><th scope="col">File</th>

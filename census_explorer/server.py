@@ -91,7 +91,9 @@ class ServiceState:
     """Loads processed datasets from disk. Never fetches."""
 
     def __init__(self, repo_root: Path, data_dir: str = "data/processed"):
-        self.repo_root = Path(repo_root)
+        # Resolved, because export paths are resolved before the containment
+        # check and a relative root would then fail to relativise back.
+        self.repo_root = Path(repo_root).resolve()
         self.data_dir = data_dir
         self.config = config_mod.load()
         self._lock = threading.RLock()   # re-entrant: values() loads the dataset it guards
@@ -571,7 +573,7 @@ def _reliability_words(v: dict, unit: str) -> str:
 
 
 def quality_report(state: ServiceState, sel: selection_mod.Selection,
-                   values: dict[str, dict]) -> dict:
+                   values: dict[str, dict], benchmark: dict | None = None) -> dict:
     """Three separate judgements, in words a reader can act on.
 
     Uncertainty, comparison eligibility and period are different concerns and
@@ -636,8 +638,22 @@ def quality_report(state: ServiceState, sel: selection_mod.Selection,
     else:
         release = sel.primary_release
         other = [r for r in state.available_releases() if r != release.release_id]
-        lines = ["Places are compared with each other inside one reference period, "
-                 "which needs no boundary equivalence."]
+        # The copy has to match the selection: one area with no reference is
+        # not a comparison, and saying so would be the brief's own first
+        # inaccuracy.
+        if len(sel.areas) > 1:
+            lines = ["Places are compared with each other inside one reference "
+                     "period, which needs no boundary equivalence."]
+        elif benchmark and benchmark.get("available"):
+            lines = [f"This brief reports a single area, read against "
+                     f"{benchmark.get('label')}. Both come from the same "
+                     "reference period, so no boundary equivalence is needed."]
+        elif benchmark:
+            lines = ["This brief reports a single area. The reference that was "
+                     "requested could not be built, so nothing is compared here."]
+        else:
+            lines = ["This brief reports a single area with no reference value, "
+                     "so nothing is being compared."]
         if other:
             evidence = state.geography_evidence(
                 release.release_id, other[0], sel.level)
@@ -673,7 +689,8 @@ def quality_report(state: ServiceState, sel: selection_mod.Selection,
 def brief_context(state: ServiceState, sel: selection_mod.Selection,
                   question_id: str, benchmark_id: str = benchmark_mod.NONE,
                   analyst_note: str = "", figure_kind: str = "",
-                  inputs: list[dict] | None = None) -> dict:
+                  inputs: list[dict] | None = None,
+                  project_id: str | None = None) -> dict:
     """Everything the brief renders, derived from one selection."""
     question = questions_mod.QUESTIONS[question_id]
     measure = sel.primary_measure
@@ -722,6 +739,10 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
         # told it could not be built, and why, rather than finding it missing.
         bench = build_benchmark(state, sel, benchmark_id).to_json()
 
+    contents = questions_mod.describe_contents(
+        option, places, len(sel.areas), sel.level, release.period_label,
+        bench["label"] if bench and bench.get("available") else None)
+
     limitations = list(question.not_answered)
     limitations.extend(measure.caveats)
     if len(ranked) > len(shown):
@@ -748,12 +769,14 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
 
     return {
         "question": question.to_json(),
+        "contents": contents,
+        "project_id": project_id,
         "summary": summary,
         "rows": rows,
         "measure": {**measure.to_json(),
                     "universe_published": measure_json["universe_published"]},
         "release": release.to_json(),
-        "quality": quality_report(state, sel, values),
+        "quality": quality_report(state, sel, values, benchmark=bench),
         "benchmark": bench,
         "limitations": limitations,
         "sources": sources,
@@ -842,12 +865,14 @@ def build_benchmark(state: ServiceState, sel: selection_mod.Selection,
 def render_brief(state: ServiceState, sel: selection_mod.Selection,
                  question_id: str, benchmark_id: str = benchmark_mod.NONE,
                  analyst_note: str = "", figure_kind: str = "",
-                 inputs: list[dict] | None = None) -> str:
+                 inputs: list[dict] | None = None,
+                 project_id: str | None = None) -> str:
     context = brief_context(state, sel, question_id, benchmark_id, analyst_note,
-                            figure_kind, inputs)
+                            figure_kind, inputs, project_id)
     svg = build_figure_for(state, sel, context["figure_kind"])
     return brief_mod.build(
-        question=context["question"], summary=context["summary"],
+        question=context["question"], contents=context["contents"],
+        project_id=context["project_id"], summary=context["summary"],
         rows=context["rows"], measure=context["measure"],
         release=context["release"], figure_svg=svg, quality=context["quality"],
         benchmark=context["benchmark"], limitations=context["limitations"],
@@ -975,7 +1000,9 @@ def run_export(state: ServiceState, payload: dict) -> dict:
             state, sel, brief_spec["question_id"],
             brief_spec.get("benchmark_id") or benchmark_mod.NONE,
             brief_spec.get("analyst_note", ""),
-            brief_spec.get("figure_kind", ""), inputs=inputs)
+            brief_spec.get("figure_kind", ""), inputs=inputs,
+            # Linked only when the brief really came from a saved project.
+            project_id=project.project_id if project else None)
 
     stamp = provenance.utc_now().replace(":", "").replace("-", "")
     name = payload.get("name") or (

@@ -7,7 +7,7 @@ evidence that the steps work, not a benchmark: step 1 in particular depends
 entirely on your connection to the Census Bureau.
 
 Measured on the fresh checkout: 8.6 s for the test suite (210 tests at
-the time of that run; 255 now), 10.3 s to retrieve
+the time of that run; 280 now), 10.3 s to retrieve
 one release (435 MB streamed), 3.6 s to reconcile, 7.9 s to build, 0.3 s to
 verify, and 0.7 s from opening the browser to the first drawn answer. The
 resulting cache is 18 MB of raw data and 12 MB of built dataset.
@@ -33,7 +33,7 @@ python -m unittest discover -s tests -t .
 Expected:
 
 ```
-Ran 255 tests in 8.5s
+Ran 280 tests in 8.8s
 OK (skipped=3)
 ```
 
@@ -224,6 +224,29 @@ At county level, 2 of 5 agree and 3 do not. See `DATA_HANDLING.md` for why a
 measurement cannot establish equivalence on its own.
 
 Comparing **places within one period** is unaffected and needs none of this.
+
+---
+
+## Printing a brief
+
+"Open the brief" produces a self-contained HTML page; the browser's own print
+dialog turns it into a PDF. Measured on A4 with 16 mm margins (a 674 x 1003 px
+content box at 96 dpi):
+
+| Brief | Laid-out height | Pages | Unsplittable elements taller than a page | Horizontal overflow |
+| --- | --- | --- | --- | --- |
+| One borough, naturalisation share with the NYC reference | 2,796 px | 3 | none | 0 px |
+| 25-row tract table, Dominican-Republic share | 4,872 px | 6 | none | 0 px |
+
+The tract brief takes six pages where its height alone implies five: the
+stylesheet keeps table rows, the figure and the quality panels from splitting,
+so the browser moves them rather than cutting them. The table itself is allowed
+to flow across pages; its tallest single row is 81 px against a 1,003 px page
+box, so no row can be split.
+
+Page counts were read from the generated PDF's own page tree. The pages were
+not rasterised and inspected visually — there is no PDF renderer in this build
+and adding one would be a new dependency.
 
 ---
 

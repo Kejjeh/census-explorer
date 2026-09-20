@@ -249,7 +249,12 @@ class BriefTests(unittest.TestCase):
     def test_the_reproducibility_record_does_not_claim_to_be_an_archive(self):
         html = self.render()
         self.assertIn("tamper check, not an archive", html)
-        self.assertIn("does not keep a copy of the data", html)
+        self.assertIn("no copy of the data is kept", html)
+
+    def test_an_unsaved_brief_does_not_claim_a_saved_brief_s_verification(self):
+        html = self.render()
+        self.assertIn("generated snapshot", html)
+        self.assertIn("cannot verify them", html)
 
     def test_the_benchmark_appears_with_its_basis(self):
         # The fixture leaves two boroughs unusable on purpose, so give the

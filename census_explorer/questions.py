@@ -276,7 +276,33 @@ def describe(question_id: str, option: MeasureOption, period_label: str,
         "counted": counted,
         "out_of": out_of,
         "unit": unit,
+        # The denominator on its own, so a caption can name it separately from
+        # the published universe of the source table. They are different
+        # things and a naturalisation share out of "Total population" reads as
+        # a contradiction.
+        "denominator_phrase": option.out_of if option.unit == "percent" else "",
     }
+
+
+def describe_contents(option: MeasureOption, place_phrase: str, area_count: int,
+                      level: str, period_label: str,
+                      benchmark_label: str | None = None) -> str:
+    """What this brief contains, derived from the selection that built it.
+
+    A question's own description says what that question is capable of
+    answering. A brief that contains one measure must not borrow it: a reader
+    holding a single-measure brief should not be told it covers four.
+    """
+    if area_count == 1:
+        scope = f"for {place_phrase}"
+    else:
+        noun = "census tracts" if level == "tract" else "boroughs"
+        scope = f"for {area_count:,} {noun}"
+    sentence = (f"This brief reports one measure, {option.label}, {scope}, "
+                f"over {period_label}.")
+    if benchmark_label:
+        sentence += f" It also shows {benchmark_label} as a reference value."
+    return sentence
 
 
 def to_json(dataset: dict[str, Any]) -> list[dict]:

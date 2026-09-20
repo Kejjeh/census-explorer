@@ -419,6 +419,40 @@ reported as published — "± 0" — rather than dressed up as an absence of
 sampling error. And a coefficient of variation is suppressed for a controlled
 count: it is zero by construction, and "CV 0%" reads as a measurement.
 
+## A brief describes itself, not its question
+
+Three sentences in an exported brief used to be true of the tool rather than of
+the file in front of the reader, and a brief is read by someone who was not
+there when it was made.
+
+- **What it shows** is derived from the selection: the measure actually
+  included, the places actually covered, the period, and the reference if one
+  was built. A question's own description says what that *question* can answer,
+  which is not the same thing: a single-measure brief must not claim four.
+- **What it can verify** depends on how it was produced. A brief exported from
+  a saved project names that project and says the app checks its pinned digests
+  on reopening. A brief opened straight from the interface says it is a
+  generated snapshot whose digests record what it was computed from but which
+  the HTML file itself cannot check. Neither claims to be an archive.
+- **The quality copy** follows the selection. One area with no reference is not
+  a comparison, and saying "places are compared with each other" there would be
+  the brief's own first inaccuracy.
+
+## Published universe and measure denominator are different things
+
+A table's published universe is a property of the source table. A measure's
+denominator is a property of the measure. For `naturalized_share_of_foreign_born`
+the source table B05002 has the published universe "Total population" while the
+share is computed out of the foreign-born population, so printing only
+"Universe: Total population" beside a naturalisation share reads as a
+contradiction.
+
+Captions name both, labelled: "Published source table universe: … Measure
+denominator: …". A count says its denominator is not applicable rather than
+leaving the reader to infer it. The technical metadata — table codes, cell
+codes, the published universe string — is unchanged and still travels in the
+source panel, the CSV and the provenance document.
+
 ## Provenance
 
 Every retrieved artifact has a manifest record: provider, kind, sanitized
