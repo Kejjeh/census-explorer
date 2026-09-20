@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+/data/
+/artifacts/
+/work/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.Rhistory
+.RData
+.Renviron
+.DS_Store
+Thumbs.db
