@@ -8,6 +8,7 @@ Repository foundation only. No data have been downloaded, no extracts submitted,
 
 ## Start here
 
+- [Social Explorer research](docs/SOCIAL_EXPLORER_RESEARCH.md): feature comparison, proposed architecture, and build milestones.
 - [Research plan](docs/RESEARCH_PLAN.md): eight research directions, definitions, validation gates, and staged delivery.
 - [Sources and claim review](docs/SOURCES.md): official documentation and unresolved claims.
 - [Project configuration](config/project.json): initial scope and explicit unresolved decisions; a planning configuration, not an executable extract.
