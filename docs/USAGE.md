@@ -1,0 +1,220 @@
+# Usage and verification
+
+Every command below was run against this checkout. Output is quoted as it
+appeared, abbreviated only where noted.
+
+PowerShell and POSIX shells take identical arguments; only the interpreter name
+(`python` vs `python3`) and the way you set an environment variable differ.
+
+## 1. Retrieve (the only commands that use the network)
+
+```powershell
+python -m census_explorer.cli fetch all --release acs5_2023
+```
+
+```
+Retrieving all for 2019-2023 ACS (acs5_2023)
+  metadata cached: B01003 (2019-2023 ACS)
+  metadata cached: B05002 (2019-2023 ACS)
+  metadata cached: B05006 (2019-2023 ACS)
+  metadata cached: B06004B (2019-2023 ACS)
+  metadata cached: B06009 (2019-2023 ACS)
+  boundaries cached: county @ GENZ2023
+  boundaries cached: tract @ GENZ2023
+  streaming Summary File for B01003 ...
+   B01003: kept 2332 rows from 18.3 MB upstream
+  streaming Summary File for B05002 ...
+   B05002: kept 2332 rows from 57.6 MB upstream
+  streaming Summary File for B05006 ...
+   B05006: kept 2332 rows from 278.5 MB upstream
+  streaming Summary File for B06004B ...
+   B06004B: kept 2332 rows from 14.6 MB upstream
+  streaming Summary File for B06009 ...
+   B06009: kept 2332 rows from 65.7 MB upstream
+done. Next: python -m census_explorer.cli build --release acs5_2023
+```
+
+2,332 rows is five boroughs plus 2,327 census tracts. Roughly 435 MB is
+streamed; about 3.4 MB is retained, plus the digest of each complete upstream
+file.
+
+Add `--transport api` to use the keyed Census Data API instead. Without
+`CENSUS_API_KEY` the command stops with an explanation and a pointer to the
+keyless path, rather than failing obscurely.
+
+## 2. Reconcile against an independently published row
+
+```powershell
+python -m census_explorer.cli reconcile --fetch --release acs5_2023
+```
+
+```json
+{
+  "checked": 6,
+  "matched": 6,
+  "results": [
+    {"cell": "B01003_001",  "status": "match", "borough_sum": 8516202.0, "published_city_value": 8516202, "difference": 0.0},
+    {"cell": "B05002_001",  "status": "match", "borough_sum": 8516202.0, "published_city_value": 8516202, "difference": 0.0},
+    {"cell": "B05002_013",  "status": "match", "borough_sum": 3108052.0, "published_city_value": 3108052, "difference": 0.0},
+    {"cell": "B05002_003",  "status": "match", "borough_sum": 4112444.0, "published_city_value": 4112444, "difference": 0.0},
+    {"cell": "B06004B_001", "status": "match", "borough_sum": 1933195.0, "published_city_value": 1933195, "difference": 0.0},
+    {"cell": "B06009_001",  "status": "match", "borough_sum": 6090653.0, "published_city_value": 6090653, "difference": 0.0}
+  ],
+  "passed": true
+}
+```
+
+The command exits non-zero on any mismatch. The same run against `acs5_2022`
+also reports 6/6.
+
+## 3. Build (offline)
+
+```powershell
+python -m census_explorer.cli build --all-releases
+```
+
+```
+Building 2019-2023 ACS (acs5_2023) from the cache
+  join: {"level": "county", "matched": 5, "unmatched_feature_count": 0, "unmatched_observation_count": 0}
+  join: {"level": "tract", "matched": 2324, "unmatched_feature_count": 0, "unmatched_observation_count": 3}
+  warning: tract @ GENZ2023: 2324 matched, 0 boundary features without observations, 3 observations without a boundary
+  dataset written: data/processed/acs5_2023/dataset.json
+```
+
+The three unmatched tract observations are `36047990100`, `36081990100` and
+`36085990100`: water tracts with a published population of zero that the
+cartographic boundary files exclude. They are reported, not dropped.
+
+## 4. Run the application
+
+```powershell
+python -m census_explorer.cli serve
+```
+
+```
+Census Explorer service on http://127.0.0.1:8765/
+  data mode: live   releases: acs5_2022, acs5_2023
+  network access is disabled in this process; press Ctrl+C to stop
+```
+
+The service refuses to bind to anything but loopback and refuses requests whose
+`Host` header is not a loopback name.
+
+In the browser: search the catalog on the left, pick a measure, switch the
+period and geography above the map, click a borough or tract (or press Enter on
+a table row) to open the sources-and-uncertainty drawer, name a project and save
+it, and export a CSV + provenance + figure bundle.
+
+## 5. Verify (all offline)
+
+### The test suite
+
+```powershell
+python -m unittest discover -s tests -t .
+```
+
+```
+Ran 130 tests in 6.2s
+OK (skipped=3)
+```
+
+The three skips are the live smoke tests, which are opt-in. Coverage by concern:
+
+| Concern | Where |
+| --- | --- |
+| Sentinel and annotation handling, missing vs zero | `tests/test_sentinels.py` |
+| Estimate/MOE pairing, aggregation, proportion formulas, zero denominators, CV limits | `tests/test_measures.py` |
+| GEOID typing, duplicate and missing geography, join accounting, shapefile reading | `tests/test_geography.py` |
+| Metadata resolution, unknown cells, variable drift between releases, cache corruption and truncation | `tests/test_metadata_and_manifest.py` |
+| Summary File and API readers, malformed and duplicate rows, transport agreement | `tests/test_dataset.py` |
+| Reconciliation mismatch reporting | `tests/test_dataset.py` |
+| Comparison rules, period labels, shared cut points | `tests/test_compare.py` |
+| Configuration validation, saved projects and schema versioning | `tests/test_config_and_projects.py` |
+| Credential redaction in logs, manifests, errors and every endpoint | `tests/test_redaction.py` |
+| Build → service → project replay → export, over real HTTP | `tests/test_end_to_end.py` |
+
+### Cache integrity
+
+```powershell
+python -m census_explorer.cli verify manifests
+```
+
+```
+  geography-acs5_2022-...json: 2 artifacts, OK
+  geography-acs5_2023-...json: 2 artifacts, OK
+  metadata-acs5_2022-...json: 5 artifacts, OK
+  metadata-acs5_2023-...json: 5 artifacts, OK
+  observations-summary-file-acs5_2022-...json: 5 artifacts, OK
+  observations-summary-file-acs5_2023-...json: 5 artifacts, OK
+  reconcile-acs5_2022-...json: 4 artifacts, OK
+  reconcile-acs5_2023-...json: 4 artifacts, OK
+manifest verification: OK
+```
+
+### Catalog against the published release
+
+```powershell
+python -m census_explorer.cli verify catalog --release acs5_2023
+```
+
+```
+47 measures checked against 2019-2023 ACS: OK
+```
+
+### Comparison compatibility
+
+```powershell
+python -m census_explorer.cli compare --a acs5_2023 --b acs5_2022 --level tract --measure foreign_born_share
+```
+
+Reports `"allowed": true`, `"shared_geoids": 2327`, `"independent_observations": false`,
+and the disclosure naming the four shared years. Comparing a five-year release
+with a one-year release is blocked instead.
+
+## 6. The live smoke test (separate and opt-in)
+
+```powershell
+$env:CENSUS_EXPLORER_LIVE = "1"
+python -m unittest tests.test_live_smoke -v
+```
+
+```
+test_table_metadata_is_reachable_without_a_credential ... ok
+test_five_boroughs_return_a_usable_population_estimate ... ok
+test_keyed_api_returns_the_same_borough_totals_as_the_summary_file ... skipped 'needs CENSUS_EXPLORER_LIVE=1 and CENSUS_API_KEY'
+```
+
+With a key configured, the third test also runs and asserts that both
+transports return identical borough totals and that the key appears in no
+manifest record.
+
+There is also a one-command version:
+
+```powershell
+python -m census_explorer.cli smoke --transport summary-file
+```
+
+## 7. Fixture mode
+
+```powershell
+python -m census_explorer.cli fixtures build
+python -m census_explorer.cli serve --data-dir data/fixture-processed
+```
+
+Every page, figure and export is banner-marked `FIXTURE MODE`, the shapes are
+labelled `SYNTHETIC SHAPES — not boundaries`, and area names begin with
+`FIXTURE`. Two of the five fixture areas deliberately exercise the unavailable
+paths: one returns an annotation instead of a value, and one has a zero
+denominator.
+
+Fixture values are synthetic. They are not census estimates and must not be
+quoted as findings.
+
+## Repository hygiene
+
+```powershell
+python -m json.tool config/project.json
+python -m json.tool config/measures.json
+git check-ignore .env data/raw/example.csv.gz artifacts/example.html
+git status --short --branch
+```

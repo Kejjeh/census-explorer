@@ -16,6 +16,10 @@ Build a personal, local census explorer supporting variable discovery, map and t
 
 ## Eight research directions
 
+**None of these is complete.** No historical microdata has been retrieved and
+no evidence gate below has been met. The table is the plan, not a report.
+
+
 | Direction | Target | Evidence and acceptance gate |
 | --- | --- | --- |
 | 1. Generations | Foreign-born and US-born children of immigrant parents | Audit parental-birthplace availability for every sample. Define mixed-parentage allocation without double counting. Do not assume availability through 1970 is universal. |
@@ -41,12 +45,12 @@ Historical samples differ in coverage, sampling fractions, available variables, 
 
 ## Staged delivery
 
-1. **Foundation (created):** repository, scope, source review, provisional configuration and research rules.
-2. **Modern data slice (next):** fetch and cache metadata and original responses for one ACS product and the five boroughs. Preserve estimate/MOE pairing, flags and universes. Record sanitized query, retrieval timestamp, response hash and code revision. Reconcile selected cells to an official published table. Tests cover missing values, sentinel handling, duplicate geography, bad responses, credential redaction and cache replay.
-3. **First explorer:** local table browser and source-backed chart, period/geography labels, uncertainty display and export. Maps follow verified boundary joins. The first app's framework and dependencies require a decision before installation.
-4. **Historical feasibility audit:** explicit sample IDs and fractions, variable availability matrix, verified group-code crosswalk, historical footprint reconstruction and variance plan. Start with a small extract. No arbitrary multi-gigabyte extraction before feasibility is established.
-5. **Historical series and generations:** reconcile benchmark years; make gaps and definitional breaks visible. Add household-design and weight checks before publishing uncertainty.
-6. **Spatial and migration extensions:** verified boundary joins, separate national migration extract, documented origin/destination resolution, age and economic comparisons.
+1. **Foundation (done):** repository, scope, source review, provisional configuration and research rules.
+2. **Modern data slice (done):** metadata and original responses are cached for two ACS five-year releases across the five boroughs and 2,327 census tracts, with estimate/MOE pairing, annotation handling and universes preserved, sanitized requests, retrieval timestamps, response hashes and code revisions recorded, and six cells per release reconciled exactly against the separately published New York City row. Offline tests cover missing values, sentinel handling, duplicate geography, malformed responses, credential redaction and cache replay. See `USAGE.md`.
+3. **First explorer (done):** a local browser application with a searchable catalog, linked map and sortable table, an area inspector showing margins of error, flags, definitions and sources, saved project definitions, and CSV + provenance + figure exports. Maps use matching-vintage Census boundaries with a reported join. No third-party dependency was added; see `DEPENDENCIES.md` for the DuckDB/MapLibre decision, which is still open.
+4. **Historical feasibility audit (not started):** explicit sample IDs and fractions, variable availability matrix, verified group-code crosswalk, historical footprint reconstruction and variance plan. Start with a small extract. No arbitrary multi-gigabyte extraction before feasibility is established.
+5. **Historical series and generations (not started):** reconcile benchmark years; make gaps and definitional breaks visible. Add household-design and weight checks before publishing uncertainty.
+6. **Spatial and migration extensions (not started):** verified boundary joins, separate national migration extract, documented origin/destination resolution, age and economic comparisons.
 
 ## Reproducibility contract
 
