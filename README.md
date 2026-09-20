@@ -129,6 +129,19 @@ Rules the code enforces:
 - `.env` is git-ignored; `.env.example` documents the variable names only.
 - Never paste a key into a chat window, an issue, or a commit.
 
+## Publishing a static copy
+
+```powershell
+python -m census_explorer.cli site build --base /census-explorer/ --out site
+```
+
+Runs this repository's Python once and writes `site/` — the interface plus
+everything it computed, as files a browser reads over relative URLs, with no
+service behind them. The explore journey works there in full. The printable
+brief, the export bundle and saved views need the local service and are
+disabled on the published page with the reason. See
+[docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Commands
 
 | Command | Network | What it does |
@@ -284,6 +297,8 @@ artifacts/           git-ignored: export bundles
 - [Product direction](docs/PRODUCT_DIRECTION.md): the promise, what is
   hypothesis, and the roadmap as candidates rather than commitments.
 - [Usage and verification](docs/USAGE.md): every command, with expected output.
+- [Publishing](docs/DEPLOY.md): the static build, exactly what it contains,
+  what a published copy cannot do, and the steps to put it on GitHub Pages.
 - [Data handling decisions](docs/DATA_HANDLING.md): universes, denominators,
   annotations, margins of error, geography and comparison rules.
 - [Dependencies](docs/DEPENDENCIES.md): what is used, and the open decision.
