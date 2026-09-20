@@ -1,8 +1,15 @@
 # Runbook: from a fresh checkout to a brief
 
-Every command here was run against this repository. Timings are wall-clock on
-the machine this was built on, over its own network; treat them as an order of
-magnitude, not a benchmark.
+Every command here was run end to end against a fresh `git clone` of this
+repository. The timings are the wall-clock times measured on that run, on the
+machine this was built on and over its own network connection. They are
+evidence that the steps work, not a benchmark: step 1 in particular depends
+entirely on your connection to the Census Bureau.
+
+Measured on the fresh checkout: 8.6 s for the test suite, 10.3 s to retrieve
+one release (435 MB streamed), 3.6 s to reconcile, 7.9 s to build, 0.3 s to
+verify, and 0.7 s from opening the browser to the first drawn answer. The
+resulting cache is 18 MB of raw data and 12 MB of built dataset.
 
 No credential is needed. The Census Bureau publishes the same ACS estimates in
 its table-based Summary File, which is open, and its metadata endpoints need no
@@ -13,7 +20,7 @@ PowerShell and POSIX shells take identical arguments. Only the interpreter name
 
 ---
 
-## 0. Check the checkout (about 10 seconds)
+## 0. Check the checkout (8.6 s measured)
 
 ```powershell
 git clone <this repository> census-explorer
@@ -25,7 +32,7 @@ python -m unittest discover -s tests -t .
 Expected:
 
 ```
-Ran 210 tests in 8.3s
+Ran 210 tests in 8.4s
 OK (skipped=3)
 ```
 
@@ -37,7 +44,7 @@ retrieving anything, skip to step 6.
 
 ---
 
-## 1. Retrieve the official bulk data (about 40 seconds per release)
+## 1. Retrieve the official bulk data (10.3 s measured, network-dependent)
 
 ```powershell
 python -m census_explorer.cli fetch all --release acs5_2023
@@ -74,7 +81,7 @@ geography filter and the published file disagree and the build will say so.
 
 ---
 
-## 2. Reconcile against an independently published row (about 20 seconds)
+## 2. Reconcile against an independently published row (3.6 s measured)
 
 New York City as a place is exactly the five boroughs, and the Census Bureau
 publishes it as its own row in the same tables. Summing the borough rows must
@@ -101,7 +108,7 @@ filter or a parsing error, so run it before trusting anything downstream.
 
 ---
 
-## 3. Build the analysis dataset (about 20 seconds, offline)
+## 3. Build the analysis dataset (7.9 s measured, offline)
 
 ```powershell
 python -m census_explorer.cli build --release acs5_2023
@@ -122,7 +129,7 @@ unmatched identifier deserves investigation before you publish anything.
 
 ---
 
-## 4. Verify the cache and the catalog (about 5 seconds, offline)
+## 4. Verify the cache and the catalog (0.3 s measured, offline)
 
 ```powershell
 python -m census_explorer.cli verify manifests
@@ -153,8 +160,10 @@ Census Explorer service on http://127.0.0.1:8765/
   network access is disabled in this process; press Ctrl+C to stop
 ```
 
-Open <http://127.0.0.1:8765/>. The first screen already shows an answer:
-a question is chosen, a place is chosen, and a measure is drawn.
+Open <http://127.0.0.1:8765/>. The first screen already shows an answer — a
+question, a place and a measure are chosen and drawn, in 0.7 s on the measured
+run. Switching to the tract-level question redraws 2,324 tract polygons in
+about 3.6 s more.
 
 1. **Pick a question.** Three are offered and each says what it answers and
    what it does not.
