@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Census Explorer</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip-link" href="#stage">Skip to the map</a>
+<div id="mode-banner" class="mode-banner" hidden></div>
+<div id="static-note" class="static-note" hidden></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="brand-name">Census Explorer</span>
+  </div>
+  <p class="release-chip" id="release-chip">
+    <span class="chip-label">Release</span>
+    <span class="chip-value" id="release-value">…</span>
+  </p>
+  <div class="topbar-actions">
+    <button type="button" class="btn" id="btn-method" aria-expanded="false"
+            aria-controls="drawer">Method &amp; sources</button>
+    <button type="button" class="btn" id="btn-save" aria-expanded="false"
+            aria-controls="save-panel">Saved views</button>
+    <button type="button" class="btn" id="btn-brief">Open brief</button>
+    <button type="button" class="btn primary" id="btn-export">Export</button>
+  </div>
+</header>
+
+<div id="startup" class="startup" aria-live="polite">
+  <p class="muted">Loading the built dataset…</p>
+</div>
+
+<div id="save-panel" class="save-panel" hidden>
+  <form id="save-form" class="save-form">
+    <label class="field">
+      <span>Save this view as</span>
+      <input type="text" id="project-id" placeholder="bronx-naturalisation"
+             pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
+    </label>
+    <button type="submit" class="btn primary" id="save-submit">Save</button>
+  </form>
+  <p class="hint" id="save-blocked" hidden></p>
+  <p class="hint">Saving pins the exact input files. Reopening checks them and
+    refuses rather than showing different numbers.</p>
+  <ul id="project-list" class="project-list"></ul>
+</div>
+
+<main class="shell" id="shell" hidden>
+
+  <aside class="sidebar" aria-label="Topics and measures">
+    <div class="sidebar-inner">
+      <div class="level-switch" role="radiogroup" aria-label="Geography">
+        <button type="button" role="radio" data-level="county" aria-checked="true">Boroughs</button>
+        <button type="button" role="radio" data-level="tract" aria-checked="false">Census tracts</button>
+      </div>
+      <p class="level-note" id="level-note"></p>
+
+      <label class="field search-field">
+        <span class="visually-hidden">Search topics and measures</span>
+        <input type="search" id="measure-search" placeholder="Search topics…"
+               autocomplete="off" aria-describedby="measure-count">
+      </label>
+      <div class="chips" role="group" aria-label="Filter by unit">
+        <button type="button" class="chip" data-unit="all" aria-pressed="true">All</button>
+        <button type="button" class="chip" data-unit="percent" aria-pressed="false">Shares</button>
+        <button type="button" class="chip" data-unit="persons" aria-pressed="false">Counts</button>
+      </div>
+      <p class="muted tiny" id="measure-count"></p>
+
+      <div id="topic-groups" class="topic-groups" role="listbox"
+           aria-label="Measure"></div>
+    </div>
+  </aside>
+
+  <section class="stage" id="stage" tabindex="-1">
+    <div class="stage-head">
+      <div class="stage-title">
+        <h1 id="measure-title">—</h1>
+        <p class="denominator" id="denominator-line"></p>
+      </div>
+      <div class="place-find">
+        <label class="field search-field">
+          <span class="visually-hidden">Find a place by name or identifier</span>
+          <input type="search" id="place-search" autocomplete="off"
+                 placeholder="Find a borough or tract…"
+                 role="combobox" aria-expanded="false" aria-autocomplete="list"
+                 aria-controls="place-results">
+        </label>
+        <ul id="place-results" class="place-results" role="listbox"
+            aria-label="Matching places" hidden></ul>
+      </div>
+    </div>
+
+    <div id="scope-bar" class="scope-bar" aria-live="polite"></div>
+
+    <section id="export-result" class="export-result" aria-live="polite" hidden>
+      <div class="export-head">
+        <h2 id="export-title">Export</h2>
+        <button type="button" class="btn ghost" id="export-dismiss">Dismiss</button>
+      </div>
+      <p class="muted tiny" id="export-what"></p>
+      <ul id="export-files" class="export-files"></ul>
+      <p class="muted tiny" id="export-where"></p>
+    </section>
+
+    <div id="blocked" class="blocked" hidden></div>
+
+    <figure class="map-figure">
+      <div class="map-frame">
+        <div id="map" class="map" tabindex="0" role="application"
+             aria-label="Map of the selected measure. Arrow keys pan, plus and minus zoom, 0 fits. The table below lists every value."></div>
+        <div class="map-tools" role="group" aria-label="Map view">
+          <button type="button" class="tool" id="zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" class="tool" id="zoom-out" aria-label="Zoom out">−</button>
+          <button type="button" class="tool wide" id="zoom-fit">Fit</button>
+        </div>
+        <div id="readout" class="readout" aria-live="polite"></div>
+        <div id="map-empty" class="map-empty" hidden></div>
+      </div>
+      <div id="legend" class="legend"></div>
+      <figcaption class="muted tiny" id="map-caption"></figcaption>
+    </figure>
+
+    <div class="table-block">
+      <div class="table-head-row">
+        <h2 id="table-title">Areas</h2>
+        <p class="muted tiny" id="table-note"></p>
+      </div>
+      <div class="table-scroll">
+        <table id="data-table">
+          <caption class="visually-hidden">
+            Estimates by area with margins of error. Same values as the map;
+            each row selects the same area the map does.
+          </caption>
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+      <p id="table-empty" class="empty-state" hidden></p>
+    </div>
+  </section>
+
+  <aside class="inspect" id="inspect" aria-label="Selected place">
+    <div class="inspect-inner">
+      <h2 class="panel-heading">Selected place</h2>
+      <div id="place-card" class="place-card"></div>
+
+      <h2 class="panel-heading">Compare</h2>
+      <div id="compare-panel" class="compare-panel"></div>
+
+      <h2 class="panel-heading">Reference</h2>
+      <label class="field">
+        <span class="visually-hidden">Compare against a reference</span>
+        <select id="benchmark-select"></select>
+      </label>
+      <div id="benchmark-card" class="benchmark-card"></div>
+
+      <details class="codes-panel">
+        <summary>Published table codes</summary>
+        <div id="source-details"></div>
+      </details>
+    </div>
+  </aside>
+</main>
+
+<aside id="drawer" class="drawer" hidden aria-label="Method and sources">
+  <div class="drawer-head">
+    <h2>Method &amp; sources</h2>
+    <button type="button" class="btn ghost" id="drawer-close">Close</button>
+  </div>
+  <div id="drawer-body" class="drawer-body"></div>
+</aside>
+
+<footer class="footer">
+  <p id="footer-provenance" class="muted tiny"></p>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="core.js"></script>
+<script>window.CENSUS_EXPLORER_STATIC = {"base":"data/","base_path":"/census-explorer/","unsupported":{"brief":"The printable brief is rendered by the local Python service, which this published site does not run. Download the data here, or run the app locally to produce a brief.","export":"Exporting a bundle writes files next to the app, which a published site cannot do. The data for exactly this selection downloads as CSV instead.","projects":"Saved views are stored and re-verified by the local Python service. This published site cannot save one, and cannot check that a saved view's inputs are unchanged, so it does not offer to.","selected_benchmark":"A reference built from the places you selected has to be recomputed from the underlying counts for each combination, which needs the local service. New York City is available here because it is one fixed set of five boroughs, computed during the build."}};</script>
+<script src="static.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
