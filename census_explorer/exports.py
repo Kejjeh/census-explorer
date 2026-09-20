@@ -209,7 +209,8 @@ def build_provenance(repo_root: Path, config: ProjectConfig,
 
 def write_bundle(out_dir: Path, csv_text: str, provenance_doc: dict,
                  figure_svg: str | None = None, readme: str | None = None,
-                 artifacts_root: Path | None = None) -> list[Path]:
+                 artifacts_root: Path | None = None,
+                 brief_html: str | None = None) -> list[Path]:
     out_dir = Path(out_dir)
     if artifacts_root is not None:
         # Checked again here, so a caller that builds a path some other way
@@ -226,6 +227,10 @@ def write_bundle(out_dir: Path, csv_text: str, provenance_doc: dict,
     if figure_svg:
         p = out_dir / "figure.svg"
         p.write_text(figure_svg, encoding="utf-8")
+        written.append(p)
+    if brief_html:
+        p = out_dir / "brief.html"
+        p.write_text(brief_html, encoding="utf-8")
         written.append(p)
     p = out_dir / "README.txt"
     p.write_text(readme or default_readme(provenance_doc), encoding="utf-8")
@@ -254,6 +259,8 @@ def default_readme(provenance_doc: dict) -> str:
         "                 checksums, geographic join accounting and any comparison rules",
         "                 that applied.",
         "figure.svg       The exported figure, if one was requested.",
+        "brief.html       The print-ready brief. Open it in a browser and use the",
+        "                 browser's own print dialog to produce a PDF.",
         "",
         "Citation",
         "--------",

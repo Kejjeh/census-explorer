@@ -26,10 +26,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from . import (compare as compare_mod, config as config_mod, exports, figures,
+from . import (benchmark as benchmark_mod, brief as brief_mod,
+               compare as compare_mod, config as config_mod, exports, figures,
                geography as geography_mod, http_client, metadata as metadata_mod,
-               projects as projects_mod, provenance, selection as selection_mod,
-               snapshot as snapshot_mod)
+               projects as projects_mod, provenance, questions as questions_mod,
+               selection as selection_mod, snapshot as snapshot_mod)
 from .redact import redact, redact_structure
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -481,7 +482,7 @@ def build_figure_for(state: ServiceState, sel: selection_mod.Selection,
                 row_values.append({
                     "e": v.get("e") if v.get("es") == "ok" else None,
                     "m": v.get("m") if v.get("ms") == "ok" else None,
-                    "note": v.get("er") or "no usable estimate",
+                    "note": plain_reason(v) if v.get("er") else "no usable estimate",
                 })
             rows.append({"label": sel.area_names.get(geoid, geoid), "values": row_values})
         return figures.group_chart_svg(
@@ -494,6 +495,330 @@ def build_figure_for(state: ServiceState, sel: selection_mod.Selection,
             data_mode=data_mode, disclosures=disclosures, scope_note=scope_note)
 
     raise ValueError(f"unknown figure kind {kind!r}")
+
+
+# ---------------------------------------------------------------------------
+# Guided brief
+# ---------------------------------------------------------------------------
+
+def plain_reason(v: dict, which: str = "e") -> str:
+    """A reason a reader can act on, without the table cell code.
+
+    The stored reason names the cell it came from, which belongs in the source
+    details rather than in the body of a brief. The code is not lost: it stays
+    in the exported CSV, in the provenance document and in the source panel.
+    """
+    raw = (v.get("er") if which == "e" else v.get("mr")) or ""
+    if not raw:
+        return "unavailable"
+    body = raw.split(": ", 1)[1] if re.match(r"^[A-Z0-9]+_\d{3}: ", raw) else raw
+    body = body.strip()
+    lowered = body[:1].lower() + body[1:] if body else body
+    if "insufficient number of sample cases" in lowered:
+        return ("too few sample cases here for the Census Bureau to publish a "
+                "value")
+    if "insufficient number of sample observations" in lowered:
+        return "too few sample observations here to compute a value"
+    if "undefined, not zero" in lowered:
+        return "the denominator is zero here, so a share is undefined, not zero"
+    if "not applicable" in lowered:
+        return "not applicable to this area"
+    if "controlled" in lowered:
+        return ("controlled to an independent population estimate, so it carries "
+                "no sampling error")
+    return lowered
+
+
+def _reliability_words(v: dict, unit: str) -> str:
+    """Say something the margin-of-error column does not already say.
+
+    For a count that is the published coefficient of variation. For a share
+    there is no CV, so the useful comparison is how large the margin of error
+    is relative to the estimate itself — stated as that, not as a CV.
+    """
+    if v.get("es") != "ok":
+        return plain_reason(v, "e")
+    if v.get("ms") != "ok":
+        return f"margin of error unavailable: {plain_reason(v, 'm')}"
+    if v.get("rel"):
+        return f"{v['rel']} (CV {v['cv']:.0f}%)" if v.get("cv") is not None else v["rel"]
+    if unit == "percent" and v.get("m") is not None and v.get("e"):
+        ratio = abs(v["m"]) / abs(v["e"]) * 100.0
+        if ratio < 10:
+            band = "narrow"
+        elif ratio < 30:
+            band = "moderate"
+        else:
+            band = "wide — read as indicative"
+        return f"{band}: the margin of error is {ratio:.0f}% of the estimate"
+    return "estimate published"
+
+
+def quality_report(state: ServiceState, sel: selection_mod.Selection,
+                   values: dict[str, dict]) -> dict:
+    """Three separate judgements, in words a reader can act on.
+
+    Uncertainty, comparison eligibility and period are different concerns and
+    are kept apart. There is no combined score: one number would hide which of
+    the three is the problem, and none of them is really a number.
+    """
+    unit = sel.primary_measure.unit
+    usable = [g for g in sel.areas if (values.get(g) or {}).get("es") == "ok"]
+    missing = [g for g in sel.areas if g not in usable]
+    with_moe = [g for g in usable if (values.get(g) or {}).get("ms") == "ok"]
+    high = [g for g in with_moe
+            if (values[g].get("cv") is not None and values[g]["cv"] >= 30)]
+
+    lines = []
+    if not sel.areas:
+        state_word, cls = "No areas selected", "blocked"
+    elif not usable:
+        state_word, cls = "No usable estimates", "blocked"
+        lines.append("Every selected area's estimate is unavailable. The reason for "
+                     "each is in the table and the exported data.")
+    else:
+        share_high = len(high) / len(usable) if usable else 0
+        if missing or share_high > 0.25:
+            state_word, cls = "Read with care", "caution"
+        else:
+            state_word, cls = "Usable as published", "ok"
+        lines.append(
+            f"{len(usable)} of {len(sel.areas)} selected areas have a published "
+            f"estimate" + (f"; {len(missing)} do not and are shown as 'no data'."
+                           if missing else "."))
+        if len(with_moe) < len(usable):
+            lines.append(
+                f"{len(usable) - len(with_moe)} have no usable margin of error. "
+                "Missing uncertainty is unavailable, not zero.")
+        if unit == "persons" and high:
+            lines.append(
+                f"{len(high)} area(s) have a high relative error (coefficient of "
+                "variation of 30% or more). Treat those single values as "
+                "indicative rather than precise.")
+        elif unit == "percent":
+            widest = max((values[g]["m"] for g in with_moe
+                          if values[g].get("m") is not None), default=None)
+            if widest is not None:
+                lines.append(
+                    f"The widest margin of error among the selected areas is "
+                    f"±{widest:.1f} percentage points at 90% confidence.")
+    uncertainty = {"state": state_word, "class": cls, "lines": lines}
+
+    # Comparison eligibility.
+    if sel.is_comparison and sel.compatibility:
+        if sel.compatibility["allowed"]:
+            comparison = {
+                "state": "Periods may be compared", "class": "ok",
+                "lines": list(sel.compatibility["disclosures"])[:3] or
+                         ["The two releases passed every compatibility check."],
+            }
+        else:
+            comparison = {
+                "state": "Comparison blocked", "class": "blocked",
+                "lines": list(sel.compatibility["blocking"])[:3],
+            }
+    else:
+        release = sel.primary_release
+        other = [r for r in state.available_releases() if r != release.release_id]
+        lines = ["Places are compared with each other inside one reference period, "
+                 "which needs no boundary equivalence."]
+        if other:
+            evidence = state.geography_evidence(
+                release.release_id, other[0], sel.level)
+            if not evidence.established:
+                lines.append(
+                    "Comparing this period against another is not available: these "
+                    "boundaries have not been verified as equivalent between the "
+                    "two releases. Next step: record documented provider "
+                    "correspondence or a scoped review in "
+                    "config/geography_equivalence.json, or run "
+                    "`cli geography footprint` to measure how far they differ.")
+        comparison = {"state": "Within one period", "class": "ok", "lines": lines}
+
+    # Period and freshness.
+    release = sel.primary_release
+    freshness = {
+        "state": release.period_label,
+        "class": "ok",
+        "lines": [
+            f"A {release.period_years}-year period estimate covering "
+            f"{release.period_start} to {release.period_end}. It describes the "
+            "whole window, not any single year in it, and must not be relabelled "
+            "with one year.",
+            f"Geography vintage: {release.geography_vintage}.",
+            "This build does not check whether the provider has published a newer "
+            "release; it reports what was retrieved.",
+        ],
+    }
+    return {"uncertainty": uncertainty, "comparison": comparison,
+            "freshness": freshness}
+
+
+def brief_context(state: ServiceState, sel: selection_mod.Selection,
+                  question_id: str, benchmark_id: str = benchmark_mod.NONE,
+                  analyst_note: str = "", figure_kind: str = "",
+                  inputs: list[dict] | None = None) -> dict:
+    """Everything the brief renders, derived from one selection."""
+    question = questions_mod.QUESTIONS[question_id]
+    measure = sel.primary_measure
+    release = sel.primary_release
+    values = state.values(release.release_id, measure.measure_id)
+    measure_json = state.measure_json(release.release_id, measure.measure_id)
+    dataset = state.dataset(release.release_id)
+
+    option = next((o for o in questions_mod.QUESTION_MEASURES[question_id]
+                   if o.measure_id == measure.measure_id), None)
+    if option is None:
+        raise ValueError(
+            f"measure '{measure.measure_id}' is not one of the options for the "
+            f"question '{question_id}'")
+
+    if len(sel.areas) == 1:
+        places = sel.area_names.get(sel.areas[0], sel.areas[0])
+    elif sel.level == "tract":
+        places = (f"{len(sel.areas):,} census tracts in New York City "
+                  "(statistical areas, not neighbourhoods)")
+    else:
+        places = ", ".join(sel.area_names.get(g, g) for g in sel.areas)
+    summary = questions_mod.describe(question_id, option, release.period_label, places)
+
+    ranked = sorted(
+        sel.areas,
+        key=lambda g: ((values.get(g) or {}).get("e")
+                       if (values.get(g) or {}).get("es") == "ok" else float("-inf")),
+        reverse=True)
+    shown = ranked if len(ranked) <= 25 else ranked[:25]
+    rows = []
+    for geoid in shown:
+        v = values.get(geoid) or {}
+        rows.append({
+            "geoid": geoid,
+            "name": sel.area_names.get(geoid, geoid),
+            "estimate": v.get("e") if v.get("es") == "ok" else None,
+            "moe": v.get("m") if v.get("ms") == "ok" else None,
+            "quality": _reliability_words(v, measure.unit),
+        })
+
+    bench = None
+    if benchmark_id and benchmark_id != benchmark_mod.NONE:
+        bench = build_benchmark(state, sel, benchmark_id).to_json()
+
+    limitations = list(question.not_answered)
+    limitations.extend(measure.caveats)
+    if len(ranked) > len(shown):
+        limitations.append(
+            f"The table lists the {len(shown)} highest of {len(ranked)} selected "
+            "areas. The exported data contains every one of them.")
+    for report in dataset.get("join_reports", []):
+        if report["level"] == sel.level and report["unmatched_observation_count"]:
+            limitations.append(
+                f"{report['unmatched_observation_count']} area(s) at this level have "
+                "no published boundary at this geography vintage and cannot be drawn "
+                f"on the map (total population "
+                f"{report.get('unmatched_observation_population')}).")
+
+    sources = [
+        release.citation,
+        f"Tables used: {', '.join(measure.tables)}. Published universe: "
+        f"{measure_json['universe_published'][0]}.",
+        f"Boundaries: {release.geography_vintage}, U.S. Census Bureau cartographic "
+        "boundary files. Generalized for display; not legal boundary descriptions.",
+        "Margins of error are the published 90% figures. Derived margins of error "
+        "use the Census Bureau's documented approximation formulas.",
+    ]
+
+    return {
+        "question": question.to_json(),
+        "summary": summary,
+        "rows": rows,
+        "measure": {**measure.to_json(),
+                    "universe_published": measure_json["universe_published"]},
+        "release": release.to_json(),
+        "quality": quality_report(state, sel, values),
+        "benchmark": bench,
+        "limitations": limitations,
+        "sources": sources,
+        "reproducibility": {
+            "manifest_id": dataset.get("manifest_id"),
+            "code_revision": dataset.get("code_revision"),
+            "inputs": inputs if inputs is not None else selection_inputs(state, sel),
+        },
+        "analyst_note": analyst_note,
+        "data_mode": dataset.get("data_mode", "live"),
+        "figure_kind": figure_kind or ("map" if sel.level == "tract"
+                                       or len(sel.areas) > 8 else "chart"),
+    }
+
+
+def build_benchmark(state: ServiceState, sel: selection_mod.Selection,
+                    benchmark_id: str) -> benchmark_mod.Benchmark:
+    """Resolve a benchmark inside the selection's own release."""
+    measure = sel.primary_measure
+    release = sel.primary_release
+    values = state.values(release.release_id, measure.measure_id)
+    county_values = values
+    counties = state.config.county_geoids
+
+    if benchmark_id == benchmark_mod.NYC:
+        available_counties = [g for g in counties
+                              if g in state.areas_at(release.release_id, "county")]
+        if not available_counties:
+            return benchmark_mod.unavailable(
+                benchmark_id, "New York City (all five boroughs)",
+                "borough-level values are not built for this release, so the city "
+                "total cannot be formed by adding them", measure.unit)
+        return benchmark_mod.aggregate(
+            measure, county_values, available_counties, benchmark_id,
+            "New York City (all five boroughs)",
+            "the five boroughs' underlying counts added together, with the measure "
+            "recomputed from the totals")
+
+    if benchmark_id == benchmark_mod.CONTAINING_BOROUGH:
+        boroughs = sorted({g[:5] for g in sel.areas})
+        if sel.level != "tract" or len(boroughs) != 1:
+            return benchmark_mod.unavailable(
+                benchmark_id, "The containing borough",
+                "this reference applies to tracts inside a single borough; the "
+                "selection spans " + (f"{len(boroughs)} boroughs" if boroughs
+                                      else "no borough"), measure.unit)
+        borough = boroughs[0]
+        if borough not in state.areas_at(release.release_id, "county"):
+            return benchmark_mod.unavailable(
+                benchmark_id, "The containing borough",
+                "the borough's published value is not built for this release",
+                measure.unit)
+        name = state.areas(release.release_id)[borough]["name"]
+        return benchmark_mod.aggregate(
+            measure, county_values, [borough], benchmark_id, name,
+            "the borough's own published figure, not an aggregate of its tracts")
+
+    if benchmark_id == benchmark_mod.SELECTED:
+        return benchmark_mod.aggregate(
+            measure, values, list(sel.areas), benchmark_id,
+            "The selected places combined",
+            "the selected places' underlying counts added together, with the "
+            "measure recomputed from the totals")
+
+    return benchmark_mod.unavailable(benchmark_id, benchmark_id,
+                                     f"unknown reference '{benchmark_id}'",
+                                     measure.unit)
+
+
+def render_brief(state: ServiceState, sel: selection_mod.Selection,
+                 question_id: str, benchmark_id: str = benchmark_mod.NONE,
+                 analyst_note: str = "", figure_kind: str = "",
+                 inputs: list[dict] | None = None) -> str:
+    context = brief_context(state, sel, question_id, benchmark_id, analyst_note,
+                            figure_kind, inputs)
+    svg = build_figure_for(state, sel, context["figure_kind"])
+    return brief_mod.build(
+        question=context["question"], summary=context["summary"],
+        rows=context["rows"], measure=context["measure"],
+        release=context["release"], figure_svg=svg, quality=context["quality"],
+        benchmark=context["benchmark"], limitations=context["limitations"],
+        sources=context["sources"], reproducibility=context["reproducibility"],
+        analyst_note=context["analyst_note"], data_mode=context["data_mode"],
+        generated_at=provenance.utc_now())
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +844,12 @@ def save_project(state: ServiceState, payload: dict) -> dict:
         manifest_ids=[i["path"].rsplit("/", 1)[-1][:-5]
                       for i in snap.inputs if i["role"] == "manifest"],
         snapshot=snap.to_json(),
+        brief={
+            "question_id": payload.get("question_id") or "",
+            "benchmark_id": payload.get("benchmark_id") or benchmark_mod.NONE,
+            "analyst_note": payload.get("analyst_note", ""),
+            "figure_kind": payload.get("figure_kind", ""),
+        } if payload.get("question_id") else None,
     )
     path = projects_mod.save(state.repo_root, project)
     return {
@@ -549,6 +880,7 @@ def replay_project(state: ServiceState, project_id: str) -> dict:
         "values": values,
         "cut_points": figure_cuts(state, sel),
         "compatibility": sel.compatibility,
+        "brief": project.brief,
         "pin": {
             "verified": True,
             "input_count": len(snap.inputs),
@@ -598,6 +930,18 @@ def run_export(state: ServiceState, payload: dict) -> dict:
     if payload.get("include_figure", True):
         svg = build_figure_for(state, sel, figure_kind)
 
+    brief_spec = dict((project.brief if project and project.brief else {}) or {})
+    for key in ("question_id", "benchmark_id", "analyst_note"):
+        if payload.get(key):
+            brief_spec[key] = payload[key]
+    brief_html = None
+    if brief_spec.get("question_id"):
+        brief_html = render_brief(
+            state, sel, brief_spec["question_id"],
+            brief_spec.get("benchmark_id") or benchmark_mod.NONE,
+            brief_spec.get("analyst_note", ""),
+            brief_spec.get("figure_kind", ""), inputs=inputs)
+
     stamp = provenance.utc_now().replace(":", "").replace("-", "")
     name = payload.get("name") or (
         f"{sel.primary_measure.measure_id}-{sel.level}-"
@@ -605,7 +949,8 @@ def run_export(state: ServiceState, payload: dict) -> dict:
     artifacts_root = state.repo_root / "artifacts"
     out_dir = exports.export_dir(artifacts_root, name, stamp)
     written = exports.write_bundle(out_dir, csv_text, prov, svg,
-                                   artifacts_root=artifacts_root)
+                                   artifacts_root=artifacts_root,
+                                   brief_html=brief_html)
     return {
         "export_dir": str(out_dir.relative_to(state.repo_root)).replace("\\", "/"),
         "files": [str(p.relative_to(state.repo_root)).replace("\\", "/") for p in written],
@@ -613,6 +958,7 @@ def run_export(state: ServiceState, payload: dict) -> dict:
         "data_mode": data_mode,
         "selection": sel.to_json(),
         "figure_kind": figure_kind if svg else None,
+        "brief": bool(brief_html),
         "comparison": sel.compatibility,
     }
 
@@ -791,6 +1137,49 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(compatibility(st, one("a"), one("b"),
                                             one("level", "county"), one("measure")))
 
+        if path == "/api/questions":
+            release = one("release") or st.config.raw["explorer"]["default_release"]
+            ds = st.dataset(release)
+            areas = [a for a in ds["areas"]]
+            return self._json({
+                "release_id": release,
+                "period_label": ds["release"]["period_label"],
+                "questions": questions_mod.to_json(ds),
+                "places": {
+                    "county": [a for a in areas if a["level"] == "county"],
+                    "tract_count": sum(1 for a in areas if a["level"] == "tract"),
+                },
+            })
+
+        if path == "/api/benchmarks":
+            release = one("release") or st.config.raw["explorer"]["default_release"]
+            level = one("level", "county")
+            selected = [a for a in (one("areas", "") or "").split(",") if a]
+            names = {g: a["name"] for g, a in st.areas(release).items()}
+            return self._json({"benchmarks": benchmark_mod.options(
+                level, selected, st.config.county_geoids, names)})
+
+        if path == "/api/benchmark":
+            sel = build_selection(st, _selection_payload(query))
+            bench = build_benchmark(st, sel, one("benchmark", benchmark_mod.NONE))
+            return self._json(bench.to_json())
+
+        if path == "/api/quality":
+            sel = build_selection(st, _selection_payload(query))
+            values = st.values(sel.primary_release.release_id,
+                               sel.primary_measure.measure_id)
+            return self._json({"quality": quality_report(st, sel, values),
+                               "selection": sel.to_json()})
+
+        if path == "/api/brief":
+            sel = build_selection(st, _selection_payload(query))
+            html_text = render_brief(
+                st, sel, one("question", questions_mod.WHO_LIVES_HERE),
+                one("benchmark", benchmark_mod.NONE),
+                one("note", "") or "", one("figure", "") or "")
+            return self._send(200, html_text.encode("utf-8"),
+                              "text/html; charset=utf-8")
+
         if path == "/api/projects":
             return self._json({"projects": projects_mod.listing(st.repo_root)})
 
@@ -818,6 +1207,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, svg.encode("utf-8"), "image/svg+xml; charset=utf-8")
 
         raise KeyError(f"no such endpoint: {path}")
+
+
+def _selection_payload(query: dict[str, list[str]]) -> dict:
+    """Build a selection payload from query parameters, validating as usual."""
+    one = lambda k, default=None: (query.get(k) or [default])[0]
+    payload = {
+        "release_id": one("release"),
+        "measure_id": one("measure"),
+        "level": one("level", "county"),
+        "comparison_release_id": one("compare") or None,
+    }
+    areas = one("areas")
+    if areas:
+        payload["areas"] = [a for a in areas.split(",") if a]
+    return payload
 
 
 def _annotation_provenance() -> dict:

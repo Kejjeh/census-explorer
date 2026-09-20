@@ -20,7 +20,7 @@ from typing import Any
 from . import provenance
 from .snapshot import Snapshot
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 PROJECT_DIR = "data/projects"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
@@ -64,6 +64,9 @@ class SavedProject:
     #: where its numbers came from but cannot tell whether they still say the
     #: same thing, so replay and export refuse when it is absent.
     snapshot: dict[str, Any] | None = None
+    #: The guided-brief choices, so reopening restores the brief the user built
+    #: rather than a bare map.
+    brief: dict[str, Any] | None = None
     schema_version: int = SCHEMA_VERSION
 
     def pin(self) -> Snapshot | None:
@@ -131,6 +134,7 @@ def listing(repo_root: Path) -> list[dict]:
             "measure_id": p.measure_id, "updated_at": p.updated_at,
             "area_count": len(p.areas),
             "pinned_input_count": len((p.snapshot or {}).get("inputs", [])),
+            "question_id": (p.brief or {}).get("question_id", ""),
         })
     return out
 
