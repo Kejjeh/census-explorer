@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Census Explorer</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="mode-banner" class="mode-banner" hidden></div>
+
+<header class="topbar">
+  <div class="brand">
+    <h1>Census Explorer</h1>
+    <p class="tagline">Local explorer for official census estimates</p>
+  </div>
+  <div class="topbar-controls">
+    <label class="field">
+      <span>Period</span>
+      <select id="release-select" aria-describedby="period-note"></select>
+    </label>
+    <label class="field">
+      <span>Compare with</span>
+      <select id="compare-select">
+        <option value="">None</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Geography</span>
+      <select id="level-select">
+        <option value="county">Boroughs (counties)</option>
+        <option value="tract">Census tracts</option>
+      </select>
+    </label>
+  </div>
+</header>
+<p id="period-note" class="period-note"></p>
+
+<div id="compat" class="compat" hidden></div>
+
+<main class="workspace">
+  <aside class="filters" aria-label="Measure catalog">
+    <div class="filter-block">
+      <label class="field">
+        <span>Search the catalog</span>
+        <input type="search" id="catalog-search" placeholder="birthplace, education, nativity…"
+               autocomplete="off" aria-describedby="catalog-count">
+      </label>
+      <div id="topic-chips" class="chips" role="group" aria-label="Filter by topic"></div>
+      <p id="catalog-count" class="muted small"></p>
+    </div>
+    <div class="filter-block grow">
+      <ul id="measure-list" class="measure-list" role="listbox"
+          aria-label="Measures"></ul>
+    </div>
+    <div class="filter-block">
+      <h2 class="side-heading">Saved projects</h2>
+      <form id="save-form" class="save-form">
+        <label class="field">
+          <span>Save this view as</span>
+          <input type="text" id="project-id" placeholder="foreign-born-boroughs"
+                 pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
+        </label>
+        <button type="submit" class="button">Save project</button>
+      </form>
+      <ul id="project-list" class="project-list"></ul>
+    </div>
+  </aside>
+
+  <section class="stage">
+    <div class="stage-head">
+      <div>
+        <h2 id="measure-title">Select a measure</h2>
+        <p id="measure-sub" class="muted"></p>
+      </div>
+      <div class="stage-actions">
+        <button type="button" class="button" id="btn-details" aria-expanded="false"
+                aria-controls="drawer">Sources &amp; uncertainty</button>
+        <button type="button" class="button" id="btn-export">Export CSV + provenance</button>
+        <a class="button" id="btn-figure" href="#" target="_blank" rel="noopener">Open figure</a>
+      </div>
+    </div>
+
+    <div class="map-row">
+      <figure class="map-figure">
+        <figcaption class="muted small" id="map-caption"></figcaption>
+        <div id="map" class="map" role="group" aria-label="Choropleth map"></div>
+        <div id="legend" class="legend" aria-hidden="true"></div>
+      </figure>
+      <figure class="map-figure" id="map-b-wrap" hidden>
+        <figcaption class="muted small" id="map-b-caption"></figcaption>
+        <div id="map-b" class="map" role="group" aria-label="Comparison choropleth map"></div>
+      </figure>
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-head">
+        <h3 id="table-title">Areas</h3>
+        <p class="muted small" id="table-note"></p>
+      </div>
+      <div class="table-scroll">
+        <table id="data-table">
+          <caption class="visually-hidden">
+            Estimates by area. This table is the accessible equivalent of the map.
+          </caption>
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<aside id="drawer" class="drawer" hidden aria-label="Sources and uncertainty">
+  <div class="drawer-head">
+    <h2 id="drawer-title">Detail</h2>
+    <button type="button" class="button ghost" id="drawer-close">Close</button>
+  </div>
+  <div id="drawer-body" class="drawer-body"></div>
+</aside>
+
+<footer class="footer">
+  <p id="footer-provenance" class="muted small"></p>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
