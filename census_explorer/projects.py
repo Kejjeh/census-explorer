@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from . import provenance
+from .snapshot import Snapshot
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROJECT_DIR = "data/projects"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
@@ -58,7 +59,15 @@ class SavedProject:
     # in place.
     requested: dict[str, Any] = field(default_factory=dict)
     substitutions: list[dict[str, Any]] = field(default_factory=list)
+    #: Digests of the exact files this project was built from, plus the measure
+    #: and release definitions as they were. Without this a project records
+    #: where its numbers came from but cannot tell whether they still say the
+    #: same thing, so replay and export refuse when it is absent.
+    snapshot: dict[str, Any] | None = None
     schema_version: int = SCHEMA_VERSION
+
+    def pin(self) -> Snapshot | None:
+        return Snapshot.from_json(self.snapshot)
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -98,7 +107,9 @@ def load(repo_root: Path, project_id: str) -> SavedProject:
     if doc.get("schema_version") != SCHEMA_VERSION:
         raise ProjectError(
             f"project '{project_id}' uses schema version {doc.get('schema_version')}, "
-            f"this build reads version {SCHEMA_VERSION}"
+            f"this build reads version {SCHEMA_VERSION}. Projects saved before "
+            "inputs were pinned cannot be replayed reproducibly; open the view you "
+            "want and save it again."
         )
     known = SavedProject.__dataclass_fields__
     return SavedProject(**{k: v for k, v in doc.items() if k in known})
@@ -119,6 +130,7 @@ def listing(repo_root: Path) -> list[dict]:
             "comparison_release_id": p.comparison_release_id, "level": p.level,
             "measure_id": p.measure_id, "updated_at": p.updated_at,
             "area_count": len(p.areas),
+            "pinned_input_count": len((p.snapshot or {}).get("inputs", [])),
         })
     return out
 
