@@ -49,8 +49,13 @@ class BrowserCoreTests(unittest.TestCase):
                 "pipeline; install Node, or set CENSUS_EXPLORER_NODE, to run "
                 f"them: {node} --test tests/js/core.test.js")
         self.assertTrue(JS_TESTS.is_file(), f"missing {JS_TESTS}")
+        # The reporter is pinned: newer Node versions default to the spec
+        # reporter, whose "fail 0" line is decorated, so a test that scanned
+        # the default output passed on one machine and failed on another for
+        # no reason but the Node version. The exit status is the real signal;
+        # the TAP plan is a second check on top of it.
         proc = subprocess.run(
-            [node, "--test", str(JS_TESTS)],
+            [node, "--test", "--test-reporter=tap", str(JS_TESTS)],
             cwd=REPO, capture_output=True, text=True, timeout=300,
             # No network is needed and none should be reachable from a test.
             env={**os.environ, "NODE_OPTIONS": ""},
@@ -58,7 +63,8 @@ class BrowserCoreTests(unittest.TestCase):
         if proc.returncode != 0:
             self.fail("the browser module's tests failed:\n"
                       + proc.stdout[-4000:] + "\n" + proc.stderr[-2000:])
-        self.assertIn("# fail 0", proc.stdout)
+        self.assertRegex(proc.stdout, r"(?m)^#\s*fail\s+0\s*$",
+                         "the TAP summary did not report zero failures")
 
 
 if __name__ == "__main__":

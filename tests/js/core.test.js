@@ -210,8 +210,8 @@ test('a view whose areas all drew does not borrow the build-wide shortfall', () 
   assert.match(first, /The single census tract in view is drawn\./);
   assert.match(second, /Across the whole build, 3 of 2,327 census tracts/);
   assert.match(second, /none of them is in this view/);
-  assert.ok(!/in this export/.test(first + second),
-    'areas outside the view were claimed to be in this export');
+  assert.ok(!/in the data for this selection/.test(first + second),
+    'areas outside the view were claimed to be in this selection');
 });
 
 test('a view that could not draw some of its own areas says so', () => {
@@ -220,7 +220,7 @@ test('a view that could not draw some of its own areas says so', () => {
     unmatchedInView: 3, ...TRACT,
   });
   assert.match(lines[0], /3 of the 2,327 census tracts in view/);
-  assert.match(lines[0], /still in the table and in this export/);
+  assert.match(lines[0], /still in the table and in the data for this selection/);
   assert.match(lines[1], /3 of them are in this view/);
 });
 

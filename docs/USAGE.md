@@ -145,6 +145,18 @@ In the browser, the journey is:
 statements, what the view does not say, and the citation. Published table codes
 stay in a details panel in the right-hand column.
 
+## 4b. Build the published static copy (offline)
+
+```powershell
+python -m census_explorer.cli site build --base /census-explorer/ --out site
+```
+
+Writes `site/`: the interface plus everything the Python computed, as files a
+browser reads over relative URLs. The explore journey works with no service
+behind it; the brief, the export bundle and saved views are service features
+and are disabled on the page with reasons. `docs/DEPLOY.md` has the full
+contents list and the publishing steps.
+
 ## 5. Verify (all offline)
 
 ### The test suite

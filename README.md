@@ -34,8 +34,9 @@ no telemetry, and the local service holds no credentials.
 | Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 318 tests, no network |
+| Offline test suite | Working: 342 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
+| Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, and the three service-only features are disabled on the page with reasons. See `docs/DEPLOY.md` |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
 Stages A, B and C of `docs/SOCIAL_EXPLORER_RESEARCH.md` are implemented. Stages
@@ -251,6 +252,12 @@ one rather than failing.
 - **Coverage is stated for the selection, not the build.** How many areas in
   view could not be drawn is separate from how many the whole build cannot
   draw, and a view that drew everything does not inherit the second number.
+- **A published copy computes nothing.** The static build runs this
+  repository's Python once and writes what it produced; the page reshapes and
+  counts, and a round-trip test compares its uncertainty panels and its CSV
+  against the service's own output, case by case. What it cannot do — the
+  printable brief, the export bundle, saved views and their input-pin check —
+  is disabled on the page with the reason, never approximated.
 - **An export is delivered, not announced.** The panel links the brief, the
   data, the figure and the provenance record; the route that serves them is
   read-only, confined to `artifacts/`, and limited to the file types an

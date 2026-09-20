@@ -49,6 +49,16 @@ const dataGate = createLoadGate();
 const benchGate = createLoadGate();
 const projectGate = createLoadGate();
 
+/**
+ * Set when this page was produced by `census_explorer.cli site build` and is
+ * being served as files, with no Python behind it. The transport below then
+ * answers out of the build's own output instead of over HTTP to the service,
+ * and the features that genuinely need the service are turned off with a
+ * reason rather than left to fail when clicked.
+ */
+const STATIC = (typeof window !== 'undefined' && window.CENSUS_EXPLORER_STATIC)
+  ? createStaticBackend(window.CENSUS_EXPLORER_STATIC) : null;
+
 const RAMP = ['#eaf1f7', '#c3d9ea', '#8fb8d6', '#5691bd', '#1f6199'];
 
 /** The shade for class `i`. A map with one class uses a middle shade rather
@@ -67,6 +77,11 @@ const $ = (id) => document.getElementById(id);
 /* ------------------------------------------------------------- transport */
 
 async function api(path) {
+  if (STATIC) {
+    const cut = path.indexOf('?');
+    return STATIC.get(cut === -1 ? path : path.slice(0, cut),
+                      new URLSearchParams(cut === -1 ? '' : path.slice(cut + 1)));
+  }
   const res = await fetch(path, { headers: { Accept: 'application/json' } });
   const body = await res.json().catch(() => ({ error: 'the response was not JSON' }));
   if (!res.ok) {
@@ -79,6 +94,12 @@ async function api(path) {
 }
 
 async function post(path, payload) {
+  if (STATIC) {
+    const err = new Error(`${path} needs the local Python service, which a ` +
+      'published site does not run.');
+    err.kind = 'static_unsupported';
+    throw err;
+  }
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -254,6 +275,7 @@ async function boot() {
   }
   state.measureId = measures()[0]?.measure_id || null;
 
+  if (STATIC) applyStaticMode();
   wireControls();
   renderLevelSwitch();
   renderSidebar();
@@ -264,6 +286,36 @@ async function boot() {
   await refresh();
   renderProjects();
   renderFooter();
+}
+
+/**
+ * Turn off what a published copy cannot do, and say so on the page.
+ *
+ * The explore journey — map, search, inspector, comparison inside one
+ * release, margins of error, denominators, coverage and source details — is
+ * the whole published dataset and behaves exactly as it does locally. The
+ * brief, the export bundle and saved views are service features. None of them
+ * is faked: the buttons are visibly unavailable and the note says why.
+ */
+function applyStaticMode() {
+  const reasons = STATIC.unsupported || {};
+  $('btn-save').hidden = true;
+  $('save-panel').hidden = true;
+  $('btn-brief').title = reasons.brief || '';
+  $('btn-export').textContent = 'Download CSV';
+  $('btn-export').title = reasons.export || '';
+
+  const note = $('static-note');
+  note.hidden = false;
+  note.innerHTML =
+    '<strong>Published copy.</strong> The map, the measures, the place search, ' +
+    'the inspector and same-period comparisons all run on the full verified ' +
+    'dataset. Three features need the local app. ' +
+    '<details><summary>Which, and why</summary><ul>' +
+    `<li><strong>Printable brief</strong> — ${esc(reasons.brief || '')}</li>` +
+    `<li><strong>Export bundle</strong> — ${esc(reasons.export || '')}</li>` +
+    `<li><strong>Saved views</strong> — ${esc(reasons.projects || '')}</li>` +
+    '</ul></details>';
 }
 
 function wireControls() {
@@ -288,6 +340,7 @@ function wireControls() {
     await refresh();
   });
   $('btn-method').addEventListener('click', () => toggleDrawer());
+  if (STATIC) $('btn-save').replaceWith($('btn-save').cloneNode(true));
   $('drawer-close').addEventListener('click', () => toggleDrawer(false));
   $('btn-export').addEventListener('click', doExport);
   $('btn-brief').addEventListener('click', openBrief);
@@ -544,8 +597,19 @@ async function loadBenchmarks() {
         state.benchmarks = res.benchmarks;
         const sel = $('benchmark-select');
         sel.textContent = '';
-        res.benchmarks.forEach((b) => sel.add(new Option(b.label, b.benchmark_id)));
-        if (!res.benchmarks.some((b) => b.benchmark_id === state.benchmarkId)) {
+        res.benchmarks.forEach((b) => {
+          const option = new Option(b.label, b.benchmark_id);
+          // A reference this build cannot compute stays in the list, visibly
+          // unavailable: an option that silently vanishes reads as one that
+          // never existed.
+          if (b.available_in_static_build === false) {
+            option.disabled = true;
+            option.text = `${b.label} — needs the local app`;
+          }
+          sel.add(option);
+        });
+        const chosen = res.benchmarks.find((b) => b.benchmark_id === state.benchmarkId);
+        if (!chosen || chosen.available_in_static_build === false) {
           state.benchmarkId = 'none';
         }
         sel.value = state.benchmarkId;
@@ -565,7 +629,9 @@ async function loadBenchmarks() {
 function updateActions() {
   const usable = state.ready && !state.loading;
   $('btn-export').disabled = !usable;
-  $('btn-brief').disabled = !usable;
+  // The brief is rendered by the service. A published copy leaves the button
+  // in place, visibly unavailable, rather than removing it silently.
+  $('btn-brief').disabled = !usable || !!STATIC;
   const submit = $('save-submit');
   if (submit) submit.disabled = !usable;
   const note = $('save-blocked');
@@ -792,11 +858,15 @@ function renderScopeBar() {
   const total = levelInfo().area_count;
   const text = document.createElement('span');
   text.className = 'scope-text';
+  // A published copy has no export bundle and no brief, so it must not claim
+  // that what is in view feeds them.
+  const covers = STATIC
+    ? 'The CSV download covers exactly these.'
+    : 'Exports and the brief cover exactly these.';
   text.textContent = state.areas.length
     ? `Showing ${n} of ${total.toLocaleString('en-US')} ${levelNoun(total)}: ` +
-      `${state.areas.map(areaName).join(', ')}. Exports and the brief cover exactly these.`
-    : `Showing all ${n.toLocaleString('en-US')} ${levelNoun(n)}. ` +
-      'Exports and the brief cover exactly these.';
+      `${state.areas.map(areaName).join(', ')}. ${covers}`
+    : `Showing all ${n.toLocaleString('en-US')} ${levelNoun(n)}. ${covers}`;
   host.appendChild(text);
   if (state.areas.length) {
     const b = document.createElement('button');
@@ -1637,8 +1707,48 @@ function openBrief() {
     'browser’s print dialog to save it as PDF.', 8000);
 }
 
+/**
+ * The same rows the local service would export, written in the browser.
+ *
+ * Every number here was computed by the Python code during the build; this
+ * only serialises them, in the exporter's own column order, and a test
+ * compares the result against the exporter's own output.
+ */
+function downloadCsv() {
+  const areas = scopedGeoids();
+  const measure = state.dataset.measures.find((m) => m.measure_id === state.measureId);
+  const names = {};
+  const levels = {};
+  state.dataset.areas.forEach((a) => { names[a.geoid] = a.name; levels[a.geoid] = a.level; });
+  const text = buildCsv({
+    release: state.dataset.release, measure, areas,
+    areaNames: names, areaLevels: levels, values: state.values,
+  });
+  const name = `${state.measureId}-${state.level}-${state.releaseId}.csv`;
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+  $('export-title').textContent = 'Data downloaded';
+  $('export-what').textContent =
+    `${measure.label} — ${areas.length.toLocaleString('en-US')} ` +
+    `${levelNoun(areas.length)}, ${state.catalog.period_label}, saved as ${name}. ` +
+    'One row per area, with the margin of error, the denominator and the ' +
+    'published cell codes, exactly as the local app exports them.';
+  $('export-files').textContent = '';
+  $('export-where').textContent = (STATIC.unsupported || {}).export || '';
+  $('export-result').hidden = false;
+  $('export-result').scrollIntoView({ block: 'nearest' });
+}
+
 async function doExport() {
   if (!state.ready) return;
+  if (STATIC) return downloadCsv();
   const areas = scopedGeoids();
   $('btn-export').disabled = true;
   try {
@@ -1817,11 +1927,18 @@ async function reopen(projectId) {
 
 function renderFooter() {
   const ref = state.status.annotation_reference || {};
+  // The published copy is a set of files, not a running service, and saying
+  // otherwise would be the footer's own first inaccuracy.
+  const closing = STATIC
+    ? 'This is a published copy: a set of files built from that manifest. It ' +
+      'holds no credentials and requests nothing outside this site. Its own ' +
+      'source manifest is at data/manifest.json.'
+    : 'This service holds no credentials and makes no network requests.';
   $('footer-provenance').textContent =
     `Data mode: ${state.dataset.data_mode}. Built ${state.dataset.built_at} from manifest ` +
     `${state.dataset.manifest_id} at code revision ${state.dataset.code_revision}. ` +
     `Annotation semantics from ${ref.source_url || 'n/a'} (retrieved ${ref.retrieved_at || 'n/a'}). ` +
-    'This service holds no credentials and makes no network requests.';
+    closing;
 }
 
 boot().catch((e) => {

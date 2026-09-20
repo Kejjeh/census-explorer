@@ -146,8 +146,8 @@ function coverageSentences(input) {
       `${missing === 1 ? 'has' : 'have'} no published boundary at this geography ` +
       `vintage${vintage ? ` (${vintage})` : ''} and ` +
       `${missing === 1 ? 'is' : 'are'} not drawn; ` +
-      `${missing === 1 ? 'it is' : 'they are'} still in the table and in this ` +
-      'export.');
+      `${missing === 1 ? 'it is' : 'they are'} still in the table and in the ` +
+      'data for this selection.');
   } else if (inViewTotal === 1) {
     out.push(`The single ${noun} in view is drawn.`);
   } else if (inViewTotal > 0) {

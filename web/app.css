@@ -136,6 +136,16 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--accent); }
 .btn.ghost:hover { background: var(--accent-soft); border-color: transparent; }
 
+.static-note {
+  background: var(--accent-soft); border-bottom: 1px solid #c3d9ea;
+  color: var(--accent-2); padding: var(--s2) var(--s4); font-size: 12.5px;
+}
+.static-note strong { font-weight: 650; }
+.static-note details { display: inline; }
+.static-note summary { display: inline; cursor: pointer; text-decoration: underline; }
+.static-note ul { margin: var(--s2) 0 0; padding-left: 18px; }
+.static-note li { margin-bottom: 3px; }
+
 .startup { padding: var(--s6) var(--s4); }
 
 .save-panel {

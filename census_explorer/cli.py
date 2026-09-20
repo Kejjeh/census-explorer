@@ -23,7 +23,8 @@ from . import (compare as compare_mod, config as config_mod, dataset as dataset_
                fixtures as fixtures_mod, geography as geography_mod, http_client,
                metadata as metadata_mod,
                pipeline, projects as projects_mod, provenance, reconcile as reconcile_mod,
-               server as server_mod, snapshot as snapshot_mod)
+               server as server_mod, site as site_mod,
+               snapshot as snapshot_mod)
 from .redact import redact
 from .retrieve import acs_api
 
@@ -149,6 +150,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--data-dir", default="data/processed",
                    help="use data/fixture-processed to run in fixture mode")
+
+    # site ----------------------------------------------------------------
+    site = sub.add_parser(
+        "site", help="build a static site from an already-built release")
+    ssub = site.add_subparsers(dest="site_action", required=True)
+    sb = ssub.add_parser("build", help="write the static site (offline)")
+    sb.add_argument("--release", default=None)
+    sb.add_argument("--out", default="site", help="output directory")
+    sb.add_argument("--base", default="/census-explorer/",
+                    help="the path the site will be served under")
+    sb.add_argument("--data-dir", default="data/processed",
+                    help="use data/fixture-processed to build a fixture site")
 
     # smoke ---------------------------------------------------------------
     sm = sub.add_parser("smoke", help="live network smoke test (explicit, separate action)")
@@ -390,6 +403,13 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
             provenance.write_json(out, report)
             log(f"written to {out.relative_to(root)}")
         return 0 if report["passed"] else 1
+
+    if args.command == "site":
+        report = site_mod.build(root, root / args.out, args.release,
+                                args.data_dir, args.base, log=log)
+        log(f"wrote {report.summary()}")
+        log(f"output: {args.out}/  (serve it under {args.base})")
+        return 0
 
     if args.command == "serve":
         server_mod.serve(root, args.host, args.port, args.data_dir, log=log)
