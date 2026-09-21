@@ -8,7 +8,7 @@
  * of variation, reliability judgement, denominator and reference value it
  * hands back was computed by the Python code and written out; what happens
  * here is reshaping, counting and text assembly. Where a feature genuinely
- * needs the service — the printable brief, writing an export bundle, saved
+ * needs the service — writing an export bundle, saved
  * views and their input checks — it is reported as unavailable with a reason
  * rather than approximated.
  */
@@ -183,14 +183,23 @@ function createStaticBackend(config) {
 
   async function file(name) {
     if (!cache.has(name)) {
-      cache.set(name, fetch(base + name, { headers: { Accept: 'application/json' } })
-        .then((res) => {
+      cache.set(name, fetch(base + name, { cache: 'no-cache', headers: { Accept: 'application/json' } })
+        .then(async (res) => {
           if (!res.ok) {
             const err = new Error(
               `this published site is missing ${name} (${res.status}). It may ` +
               'have been deployed from an incomplete build.');
             err.status = res.status;
             throw err;
+          }
+          if (config.dataDigests) {
+            const expected = config.dataDigests['data/' + name];
+            if (!expected) throw new Error('This file is not part of the published snapshot.');
+            const bytes = await res.arrayBuffer();
+            const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+              .map(b => b.toString(16).padStart(2, '0')).join('');
+            if (hash !== expected) throw new Error('Published files changed or did not load consistently. Reload the page before sharing or exporting.');
+            return JSON.parse(new TextDecoder().decode(bytes));
           }
           return res.json();
         })
