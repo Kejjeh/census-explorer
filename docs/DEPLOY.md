@@ -24,7 +24,7 @@ the build. The page reshapes, counts and draws.
 | Uncertainty, comparison and period panels | Yes | Yes |
 | Coverage reporting and source details | Yes | Yes |
 | CSV of exactly the selection | Yes, downloaded in the browser | Yes |
-| Printable HTML brief | **No** — the button is disabled, with the reason | Yes |
+| Printable HTML brief | Yes — selected scope, up to 25 printed rows; CSV contains all rows | Yes |
 | Export bundle (brief + CSV + figure + provenance) | **No** | Yes |
 | Saved views and their input-pin check | **No**, and it does not pretend to | Yes |
 
@@ -145,3 +145,18 @@ checked.
 `site build` is deterministic for a given `data/processed` and code revision:
 run it again and republish. `data/digests.json` in the published copy records
 what the build wrote, so two builds can be compared file by file.
+
+
+### Sharing a published view
+
+Use **Share view** and copy the displayed link. It restores the release, measure,
+geography level, selected scope, inspected place, two-place comparison and NYC
+reference. Zoom and table sort are not included. Invalid links and links for a
+different published data snapshot are refused, with a link to the current home
+page. Data files are checked against their build digests as they load.
+
+This is not a saved project: it does not pin or re-check the raw retrieval cache.
+The public brief likewise is a generated snapshot, with denominators, uncertainty,
+source cells and explicit reference limits. It lists at most 25 selected places
+in GEOID order and says when rows are omitted; CSV always includes the full scope.
+Use the browser Print command in the brief tab to print or save as PDF.

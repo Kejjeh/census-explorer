@@ -137,9 +137,10 @@ python -m census_explorer.cli site build --base /census-explorer/ --out site
 
 Runs this repository's Python once and writes `site/` — the interface plus
 everything it computed, as files a browser reads over relative URLs, with no
-service behind them. The explore journey works there in full. The printable
-brief, the export bundle and saved views need the local service and are
-disabled on the published page with the reason. See
+service behind them. The explore journey, shareable links and printable briefs
+work there. Links check the published data snapshot; briefs list up to 25 selected
+places and CSV includes the full scope. Export bundles and saved projects
+still need the local service. See
 [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Commands
@@ -269,7 +270,7 @@ one rather than failing.
   repository's Python once and writes what it produced; the page reshapes and
   counts, and a round-trip test compares its uncertainty panels and its CSV
   against the service's own output, case by case. What it cannot do — the
-  printable brief, the export bundle, saved views and their input-pin check —
+  export bundle, saved views and their raw-input pin check —
   is disabled on the page with the reason, never approximated.
 - **An export is delivered, not announced.** The panel links the brief, the
   data, the figure and the provenance record; the route that serves them is

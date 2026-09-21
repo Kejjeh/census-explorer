@@ -25,10 +25,13 @@
             aria-controls="drawer">Method &amp; sources</button>
     <button type="button" class="btn" id="btn-save" aria-expanded="false"
             aria-controls="save-panel">Saved views</button>
+    <button type="button" class="btn" id="btn-share" aria-controls="share-result" aria-expanded="false" hidden>Share view</button>
     <button type="button" class="btn" id="btn-brief">Open brief</button>
     <button type="button" class="btn primary" id="btn-export">Export</button>
   </div>
 </header>
+
+<div id="share-result" class="share-panel" role="region" aria-label="Share this view" hidden><label class="field">Copy this link<input id="share-url" type="text" readonly></label><button class="btn" id="share-copy" type="button">Copy link</button> <button class="btn" id="share-close" type="button">Close sharing</button><p>Reopens the measure, geography, selected scope, inspected place, comparison and reference. It checks the published snapshot; it is not a saved project. Map zoom and table sort are not included.</p></div>
 
 <div id="startup" class="startup" aria-live="polite">
   <p class="muted">Loading the built dataset…</p>
@@ -181,6 +184,7 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="core.js"></script>
+<script src="publish.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

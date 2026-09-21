@@ -59,9 +59,6 @@ UNCERTAINTY_TEMPLATES = {
 #: What the static build cannot do, and why. Shown in the interface rather
 #: than left for a reader to discover by clicking something that does nothing.
 UNSUPPORTED = {
-    "brief": ("The printable brief is rendered by the local Python service, "
-              "which this published site does not run. Download the data here, "
-              "or run the app locally to produce a brief."),
     "export": ("Exporting a bundle writes files next to the app, which a "
                "published site cannot do. The data for exactly this selection "
                "downloads as CSV instead."),
@@ -247,14 +244,14 @@ def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
     # handler reads it: a build run against a data directory somewhere else
     # must still publish this app, not look for one beside the data.
     web = server.WEB_DIR
-    for name in ("app.css", "app.js", "core.js", "static.js"):
+    for name in ("app.css", "app.js", "core.js", "static.js", "publish.js"):
         source = web / name
         written += _write(out_dir / name, source.read_bytes(), files)
     index = (web / "index.html").read_text(encoding="utf-8")
     injected = (
         '<script>window.CENSUS_EXPLORER_STATIC = '
         + json.dumps({"base": "data/", "base_path": base_path,
-                      "unsupported": UNSUPPORTED},
+                      "unsupported": UNSUPPORTED, "snapshot": "__CENSUS_SNAPSHOT__", "dataDigests": "__CENSUS_DIGESTS__"},
                      separators=(",", ":"))
         + ';</script>\n<script src="static.js"></script>\n'
     )
@@ -396,6 +393,17 @@ def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
             "FIXTURE DATA — every value in this build is synthetic test data "
             "and must not be read as a census finding.")
     written += _write(data / "manifest.json", manifest, files)
+
+    # Pin public data and interpretation metadata, independently of UI assets.
+    snapshot_inputs = {path.relative_to(out_dir).as_posix():
+                       provenance.sha256_bytes(path.read_bytes())
+                       for path in sorted(files) if data in path.parents}
+    snapshot = provenance.sha256_bytes(json.dumps(
+        {key: value for key, value in snapshot_inputs.items()
+         if key != "data/manifest.json"}, sort_keys=True).encode())
+    page = out_dir / "index.html"
+    page.write_text(page.read_text("utf-8").replace("__CENSUS_SNAPSHOT__", snapshot)
+                    .replace('"__CENSUS_DIGESTS__"', json.dumps(snapshot_inputs, separators=(",", ":"))), encoding="utf-8")
 
     # -- digests, so a published file can be checked against this build ----
     digests = {}

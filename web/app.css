@@ -553,3 +553,6 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
   #measure-title { font-size: 18px; }
   .pc-value { font-size: 26px; }
 }
+
+.share-panel {margin:16px; padding:16px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius)}
+.share-panel input {width:100%; min-width:0; box-sizing:border-box}

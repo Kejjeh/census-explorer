@@ -241,3 +241,5 @@ test('a build with every area drawn says nothing build-wide', () => {
   assert.strictEqual(lines.length, 1);
   assert.match(lines[0], /Every one of the 5 boroughs in view is drawn\./);
 });
+
+require('./publish.test.js');

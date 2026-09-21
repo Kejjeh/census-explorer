@@ -62,6 +62,22 @@ class _Built(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class NoServiceTests(_Built):
+    def test_shared_snapshot_stays_stable_across_republishing(self):
+        from unittest.mock import patch
+        def config(directory):
+            html = (directory / "index.html").read_text("utf-8")
+            return json.loads(re.search(r"window.CENSUS_EXPLORER_STATIC = (.*?);</script>", html).group(1))
+        before = config(self.out)
+        other = self.root / "republished"
+        with patch("census_explorer.site.provenance.utc_now", return_value="2099-01-01T00:00:00Z"):
+            site.build(self.root, other, "testrel", base_path="/census-explorer/", log=lambda *a: None)
+        after = config(other)
+        self.assertEqual(before["snapshot"], after["snapshot"])
+        self.assertNotEqual(before["dataDigests"]["data/manifest.json"], after["dataDigests"]["data/manifest.json"])
+        self.assertRegex(before["snapshot"], r"^[0-9a-f]{64}$")
+        for name, digest in before["dataDigests"].items():
+            self.assertEqual(digest, site.provenance.sha256_bytes((self.out / name).read_bytes()))
+
     def test_the_page_never_asks_for_an_api_endpoint(self):
         html = (self.out / "index.html").read_text("utf-8")
         self.assertNotIn("/api/", html)
@@ -174,7 +190,7 @@ class PublishableContentsTests(_Built):
 
     def test_the_manifest_records_what_this_copy_cannot_do(self):
         manifest = self.data("manifest.json")
-        for key in ("brief", "export", "projects"):
+        for key in ("export", "projects"):
             self.assertIn(key, manifest["unsupported_here"])
             self.assertTrue(manifest["unsupported_here"][key].strip())
 

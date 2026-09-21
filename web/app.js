@@ -275,7 +275,15 @@ async function boot() {
   }
   state.measureId = measures()[0]?.measure_id || null;
 
-  if (STATIC) applyStaticMode();
+  if (STATIC) {
+    const shared = decodeSharedView(location.hash, shareContext());
+    if (shared) {
+      state.level = shared.level; state.measureId = shared.measure;
+      state.areas = [...shared.areas]; state.benchmarkId = shared.benchmark;
+      state.pick = shared.pick; state.compare = [...shared.compare];
+    }
+    applyStaticMode();
+  }
   wireControls();
   renderLevelSwitch();
   renderSidebar();
@@ -294,14 +302,23 @@ async function boot() {
  * The explore journey — map, search, inspector, comparison inside one
  * release, margins of error, denominators, coverage and source details — is
  * the whole published dataset and behaves exactly as it does locally. The
- * brief, the export bundle and saved views are service features. None of them
- * is faked: the buttons are visibly unavailable and the note says why.
+ * export bundle and saved views still require the service.
  */
 function applyStaticMode() {
   const reasons = STATIC.unsupported || {};
   $('btn-save').hidden = true;
   $('save-panel').hidden = true;
-  $('btn-brief').title = reasons.brief || '';
+  $('btn-share').hidden = false;
+  $('btn-share').addEventListener('click', shareView);
+  $('share-close').addEventListener('click', () => {
+    $('share-result').hidden = true; $('btn-share').setAttribute('aria-expanded', 'false');
+    $('btn-share').focus();
+  });
+  $('share-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('share-url').value); toast('Link copied.'); }
+    catch (_) { $('share-url').focus(); $('share-url').select(); toast('Select and copy the link from the text field.'); }
+  });
+  window.addEventListener('hashchange', () => { if (location.hash.startsWith('#view=')) location.reload(); });
   $('btn-export').textContent = 'Download CSV';
   $('btn-export').title = reasons.export || '';
 
@@ -310,9 +327,8 @@ function applyStaticMode() {
   note.innerHTML =
     '<strong>Published copy.</strong> The map, the measures, the place search, ' +
     'the inspector and same-period comparisons all run on the full verified ' +
-    'dataset. Three features need the local app. ' +
+    'dataset. Share a view or open a printable brief here. Two features need the local app. ' +
     '<details><summary>Which, and why</summary><ul>' +
-    `<li><strong>Printable brief</strong> — ${esc(reasons.brief || '')}</li>` +
     `<li><strong>Export bundle</strong> — ${esc(reasons.export || '')}</li>` +
     `<li><strong>Saved views</strong> — ${esc(reasons.projects || '')}</li>` +
     '</ul></details>';
@@ -629,9 +645,9 @@ async function loadBenchmarks() {
 function updateActions() {
   const usable = state.ready && !state.loading;
   $('btn-export').disabled = !usable;
-  // The brief is rendered by the service. A published copy leaves the button
-  // in place, visibly unavailable, rather than removing it silently.
-  $('btn-brief').disabled = !usable || !!STATIC;
+  // Exports and briefs require a single completed selection.
+  $('btn-brief').disabled = !usable;
+  $('btn-share').disabled = !usable;
   const submit = $('save-submit');
   if (submit) submit.disabled = !usable;
   const note = $('save-blocked');
@@ -689,13 +705,14 @@ function clearCurrentView() {
 
 async function refresh() {
   if (!state.measureId) return;
+  $('share-result').hidden = true; $('btn-share').setAttribute('aria-expanded', 'false');
   const req = currentRequest();
   await dataGate.run(async () => {
     const rel = encodeURIComponent(req.releaseId);
     const [values, geo, quality] = await Promise.all([
       api(`/api/values?release=${rel}&measure=${encodeURIComponent(req.measureId)}`),
       api(`/api/geography?release=${rel}&level=${req.level}`),
-      api(`/api/quality?${selectionQueryFor(req)}`),
+      api(`/api/quality?${selectionQueryFor(req)}&benchmark=${encodeURIComponent(req.benchmarkId)}`),
     ]);
     // Built from the snapshot, not from the live state: by now the reference
     // control may already hold a different value belonging to a newer load.
@@ -858,10 +875,9 @@ function renderScopeBar() {
   const total = levelInfo().area_count;
   const text = document.createElement('span');
   text.className = 'scope-text';
-  // A published copy has no export bundle and no brief, so it must not claim
-  // that what is in view feeds them.
+  // The public brief explicitly caps its printed table at 25 rows.
   const covers = STATIC
-    ? 'The CSV download covers exactly these.'
+    ? 'The CSV covers exactly these; the brief lists up to 25.'
     : 'Exports and the brief cover exactly these.';
   text.textContent = state.areas.length
     ? `Showing ${n} of ${total.toLocaleString('en-US')} ${levelNoun(total)}: ` +
@@ -1389,6 +1405,7 @@ function referenceRow(m) {
 /* --------------------------------------------------------- inspect panel */
 
 function selectArea(geoid, opts = {}) {
+  dismissShare();
   state.pick = geoid;
   if (opts.focus) focusOnArea(geoid);
   markMapSelection();
@@ -1399,6 +1416,7 @@ function selectArea(geoid, opts = {}) {
 }
 
 function clearPick() {
+  dismissShare();
   state.pick = null;
   markMapSelection();
   renderReadout();
@@ -1482,6 +1500,7 @@ function renderPlaceCard() {
 }
 
 function addToCompare(geoid) {
+  dismissShare();
   if (state.compare.includes(geoid)) return;
   if (state.compare.length >= 2) {
     toast('Two places at a time. Remove one first — a comparison a reader can ' +
@@ -1495,6 +1514,7 @@ function addToCompare(geoid) {
 }
 
 function removeFromCompare(geoid) {
+  dismissShare();
   state.compare = state.compare.filter((g) => g !== geoid);
   markMapSelection();
   renderComparePanel();
@@ -1575,6 +1595,7 @@ function renderComparePanel() {
     clearBoth.className = 'btn ghost';
     clearBoth.textContent = 'Clear comparison';
     clearBoth.addEventListener('click', () => {
+      dismissShare();
       state.compare = [];
       markMapSelection();
       renderComparePanel();
@@ -1694,9 +1715,43 @@ function renderDrawer() {
 
 /* --------------------------------------------------------- brief + export */
 
+function dismissShare() {
+  $('share-result').hidden = true; $('btn-share').setAttribute('aria-expanded', 'false');
+}
+function shareContext() {
+  return {snapshot: window.CENSUS_EXPLORER_STATIC.snapshot, release: state.releaseId,
+    catalog: state.catalog, areas: state.dataset.areas};
+}
+function shareView() {
+  if (!state.ready || state.loading) return;
+  try {
+    const hash = encodeSharedView({v: 1, snapshot: shareContext().snapshot,
+      release: state.releaseId, level: state.level, measure: state.measureId,
+      areas: [...state.areas], benchmark: state.benchmarkId,
+      pick: state.pick, compare: [...state.compare]}, shareContext());
+    const url = new URL(location.href); url.hash = hash;
+    $('share-url').value = url.href;
+    $('share-result').hidden = false;
+    $('btn-share').setAttribute('aria-expanded', 'true');
+    $('share-url').focus(); $('share-url').select();
+    toast('Link ready to copy. It restores this selection and checks the published snapshot.');
+  } catch (e) { toast(e.message, 9000); }
+}
+function openPublishedBrief() {
+  const full = state.dataset.measures.find(m => m.measure_id === state.measureId);
+  const html = publishedBrief({dataset: state.dataset, measure: {...full, ...currentMeasure()},
+    areas: scopedGeoids(), values: state.values, quality: state.quality,
+    benchmark: state.benchmark, snapshot: shareContext().snapshot, compare: [...state.compare], coverage: coverageNote()});
+  const url = URL.createObjectURL(new Blob([html], {type: 'text/html;charset=utf-8'}));
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  toast('Brief opened in a new tab. Use your browser’s Print command to save it as PDF.', 8000);
+}
+
 /** Open the brief for exactly what is on screen, without writing anything. */
 function openBrief() {
-  if (!state.ready) return;
+  if (!state.ready || state.loading) return;
+  if (STATIC) return openPublishedBrief();
   const req = currentRequest();
   const url = `/api/brief?${selectionQueryFor(req)}` +
     `&question=${encodeURIComponent(state.questionId || '')}` +
@@ -1943,5 +1998,6 @@ function renderFooter() {
 
 boot().catch((e) => {
   $('startup').innerHTML =
-    `<p class="blocked"><strong>Could not start</strong>${esc(e.message)}</p>`;
+    `<p class="blocked"><strong>Could not start</strong> ${esc(e.message)}</p>` +
+    '<p><a href="./">Open the current home page</a></p>';
 });
