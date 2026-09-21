@@ -36,7 +36,7 @@ no telemetry, and the local service holds no credentials.
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
 | Offline test suite | Working: 342 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
-| Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, and the three service-only features are disabled on the page with reasons. See `docs/DEPLOY.md` |
+| Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, with shareable views and printable briefs; saved projects and export bundles still require the local app. See `docs/DEPLOY.md` |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
 Stages A, B and C of `docs/SOCIAL_EXPLORER_RESEARCH.md` are implemented. Stages
