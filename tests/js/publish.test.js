@@ -44,6 +44,32 @@ test('large brief explicitly lists only 25 rows without claiming an aggregate', 
   assert.ok(html.includes('No combined estimate is implied'));
   assert.equal((html.match(/<tr>/g)||[]).length,26);
 });
+test('digest checking says why it cannot run without a secure origin', async () => {
+  // crypto.subtle is absent over plain http. Without this the first data
+  // fetch failed on "cannot read properties of undefined", which tells a
+  // reader nothing about the cause.
+  const fetchOriginal = global.fetch;
+  const cryptoOriginal = global.crypto;
+  try {
+    global.fetch = async () => ({ok: true, arrayBuffer: async () => new ArrayBuffer(2)});
+    Object.defineProperty(global, 'crypto', {value: {}, configurable: true});
+    const backend = createStaticBackend({dataDigests: {'data/status.json': '0'.repeat(64)}});
+    await assert.rejects(backend.get('/api/status', new URLSearchParams()),
+                         /secure origin/);
+  } finally {
+    global.fetch = fetchOriginal;
+    Object.defineProperty(global, 'crypto', {value: cryptoOriginal, configurable: true});
+  }
+});
+test('a file outside the published snapshot is refused', async () => {
+  const original = global.fetch;
+  try {
+    global.fetch = async () => ({ok: true, arrayBuffer: async () => new ArrayBuffer(2)});
+    const backend = createStaticBackend({dataDigests: {'data/other.json': '0'.repeat(64)}});
+    await assert.rejects(backend.get('/api/status', new URLSearchParams()),
+                         /not part of the published snapshot/);
+  } finally { global.fetch = original; }
+});
 test('published files fail closed on digest mismatch and can retry', async () => {
   const original=global.fetch;
   try {

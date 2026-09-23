@@ -1361,8 +1361,17 @@ class Handler(BaseHTTPRequestHandler):
             sel = build_selection(st, _selection_payload(query))
             values = st.values(sel.primary_release.release_id,
                                sel.primary_measure.measure_id)
+            # The comparison panel reads differently when a reference is on
+            # screen: one area beside New York City is a comparison, and
+            # saying "nothing is being compared" beneath a visible reference
+            # value is wrong. The published site already passes this through,
+            # so leaving it out here made local and published disagree.
+            bench_id = one("benchmark", benchmark_mod.NONE)
+            bench = None
+            if bench_id and bench_id != benchmark_mod.NONE:
+                bench = build_benchmark(st, sel, bench_id).to_json()
             return self._json({
-                "quality": quality_report(st, sel, values),
+                "quality": quality_report(st, sel, values, benchmark=bench),
                 "selection": sel.to_json(),
                 # Resolved here rather than in the page: the rule that maps a
                 # selection to the question that frames its brief lives in one

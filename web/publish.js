@@ -6,7 +6,7 @@ function validateSharedView(view, context) {
   const keys = ['v', 'snapshot', 'release', 'level', 'measure', 'areas', 'benchmark', 'pick', 'compare'];
   if (Object.keys(view).some(k => !keys.includes(k)) || keys.some(k => !(k in view))) fail('unsupported link format.');
   if (view.v !== 1) fail('unsupported link version.');
-  if (view.snapshot !== context.snapshot) fail('this link belongs to a different published snapshot. Open the home page to explore the current data.');
+  if (view.snapshot !== context.snapshot) fail('it was made from a different published snapshot of the data.');
   if (view.release !== context.release) fail('this release is not available here.');
   const level = context.catalog.levels[view.level];
   if (!level || !level.groups) fail('unknown geography level.');

@@ -276,11 +276,29 @@ async function boot() {
   state.measureId = measures()[0]?.measure_id || null;
 
   if (STATIC) {
-    const shared = decodeSharedView(location.hash, shareContext());
+    // A link that cannot be applied must not take the whole page down with
+    // it. The selection it asked for is not guessed at and nothing from it is
+    // partially applied; the current data loads instead and the banner says
+    // what happened, so a reader who followed a stale link still lands
+    // somewhere they can work.
+    let shared = null;
+    let linkProblem = null;
+    try {
+      shared = decodeSharedView(location.hash, shareContext());
+    } catch (e) {
+      linkProblem = e.message.replace(/^Shared view:\s*/, '');
+    }
     if (shared) {
       state.level = shared.level; state.measureId = shared.measure;
       state.areas = [...shared.areas]; state.benchmarkId = shared.benchmark;
       state.pick = shared.pick; state.compare = [...shared.compare];
+    } else if (linkProblem) {
+      // Drop the hash so a reload does not fail the same way, and so the
+      // address bar stops promising a selection that is not on screen.
+      try {
+        history.replaceState(null, '', location.pathname + location.search);
+      } catch (_) { /* a browser that refuses this still shows the banner */ }
+      showLinkProblem(linkProblem);
     }
     applyStaticMode();
   }
@@ -304,6 +322,24 @@ async function boot() {
  * the whole published dataset and behaves exactly as it does locally. The
  * export bundle and saved views still require the service.
  */
+/** Say that a shared link was not applied, and what is on screen instead. */
+function showLinkProblem(reason) {
+  const note = $('link-note');
+  note.hidden = false;
+  note.textContent = '';
+  const text = document.createElement('span');
+  const sentence = reason.charAt(0).toUpperCase() + reason.slice(1);
+  text.innerHTML = '<strong>That shared link was not opened.</strong> ' +
+    `${esc(sentence)} Nothing from the link was applied; this is the current ` +
+    'published data.';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn';
+  close.textContent = 'Dismiss';
+  close.addEventListener('click', () => { note.hidden = true; });
+  note.append(text, close);
+}
+
 function applyStaticMode() {
   const reasons = STATIC.unsupported || {};
   $('btn-save').hidden = true;

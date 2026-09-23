@@ -195,8 +195,18 @@ function createStaticBackend(config) {
           if (config.dataDigests) {
             const expected = config.dataDigests['data/' + name];
             if (!expected) throw new Error('This file is not part of the published snapshot.');
+            // Browsers expose crypto.subtle only on a secure origin. Without
+            // this the first data fetch fails on "cannot read properties of
+            // undefined", which says nothing about the cause.
+            const subtle = (typeof crypto !== 'undefined' && crypto.subtle) || null;
+            if (!subtle) {
+              throw new Error(
+                'This copy checks every published file against its digest, ' +
+                'which the browser allows only on a secure origin. Open this ' +
+                'site over https.');
+            }
             const bytes = await res.arrayBuffer();
-            const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+            const hash = Array.from(new Uint8Array(await subtle.digest('SHA-256', bytes)))
               .map(b => b.toString(16).padStart(2, '0')).join('');
             if (hash !== expected) throw new Error('Published files changed or did not load consistently. Reload the page before sharing or exporting.');
             return JSON.parse(new TextDecoder().decode(bytes));

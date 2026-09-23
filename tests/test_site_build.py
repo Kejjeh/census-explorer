@@ -119,6 +119,88 @@ class NoServiceTests(_Built):
 
 
 # ---------------------------------------------------------------------------
+# 1b. It never destroys a directory that is not its own output
+# ---------------------------------------------------------------------------
+
+class OutputDirectoryTests(_Built):
+    """`--out` is the one argument that deletes things, so it is checked."""
+
+    def keeper(self, name: str) -> Path:
+        target = self.root / name
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "important.txt").write_text("keep me", encoding="utf-8")
+        return target
+
+    def assert_refused(self, target, fragment):
+        with self.assertRaises(site.UnsafeOutputDirectory) as caught:
+            site.build(self.root, target, "testrel", log=lambda *a: None)
+        message = str(caught.exception)
+        self.assertIn(fragment, message)
+        self.assertIn("Nothing was deleted", message)
+
+    def test_a_directory_with_someone_else_s_files_is_refused_untouched(self):
+        target = self.keeper("not-ours")
+        self.assert_refused(target, "not a previous build")
+        self.assertEqual((target / "important.txt").read_text("utf-8"), "keep me")
+
+    def test_the_repository_itself_is_refused(self):
+        self.assert_refused(self.root, "that is the repository itself")
+
+    def test_a_directory_containing_the_repository_is_refused(self):
+        self.assert_refused(self.root.parent, "contains the repository")
+
+    def test_the_filesystem_root_is_refused(self):
+        self.assert_refused(Path(self.root.anchor or "/"), "root of the filesystem")
+
+    def test_a_git_checkout_is_refused(self):
+        target = self.keeper("a-checkout")
+        (target / ".git").mkdir()
+        self.assert_refused(target, "git repository")
+
+    def test_a_file_is_refused_rather_than_replaced(self):
+        target = self.root / "a-file"
+        target.write_text("not a directory", encoding="utf-8")
+        self.assert_refused(target, "a file, not a directory")
+        self.assertEqual(target.read_text("utf-8"), "not a directory")
+
+    def test_an_empty_directory_is_accepted(self):
+        target = self.root / "empty-out"
+        target.mkdir()
+        report = site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertTrue((report.out_dir / "index.html").is_file())
+
+    def test_a_previous_build_is_replaced(self):
+        target = self.root / "again"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        (target / "data" / "values" / "left-over.json").write_text("{}", encoding="utf-8")
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertFalse((target / "data" / "values" / "left-over.json").exists(),
+                         "a rebuild left a file from the previous build behind")
+        self.assertTrue((target / "data" / "manifest.json").is_file())
+
+    def test_a_build_that_fails_leaves_the_previous_copy_alone(self):
+        from unittest.mock import patch
+        target = self.root / "survivor"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        before = (target / "data" / "manifest.json").read_bytes()
+        with patch("census_explorer.site.server.measure_catalog",
+                    side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertEqual((target / "data" / "manifest.json").read_bytes(), before)
+        leftovers = [p.name for p in target.parent.iterdir()
+                     if p.name.startswith(".") and p.name.endswith(".building")]
+        self.assertEqual(leftovers, [], "a failed build left its staging directory")
+
+    def test_the_report_names_the_directory_the_caller_asked_for(self):
+        target = self.root / "named"
+        report = site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertEqual(report.out_dir, target.resolve())
+        for path in report.files:
+            self.assertTrue(path.is_file(), f"{path} is not where the report says")
+
+
+# ---------------------------------------------------------------------------
 # 2. It contains only what may be published
 # ---------------------------------------------------------------------------
 

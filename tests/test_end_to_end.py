@@ -232,6 +232,38 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(doc["offline"], "the service must have network access disabled")
         self.assertIn("census.gov", doc["annotation_reference"]["source_url"])
 
+    def test_quality_reads_the_reference_the_page_is_showing(self):
+        # The page sends the reference it has on screen. Ignoring it made the
+        # comparison panel say "nothing is being compared" underneath a
+        # visible reference value, and made the local app disagree with the
+        # published copy, which passes the same thing through.
+        query = ("release=testrel&measure=naturalized_share_of_foreign_born"
+                 "&level=county&areas=36005")
+        alone = " ".join(
+            self.get(f"/api/quality?{query}")["quality"]["comparison"]["lines"])
+        self.assertIn("no reference value", alone)
+
+        # The fixture cannot build the New York City composite, because one
+        # borough is deliberately missing from it. That is still a reference
+        # the reader asked for, so the panel has to account for it rather
+        # than repeat that nothing was compared.
+        referenced = " ".join(
+            self.get(f"/api/quality?{query}&benchmark=nyc")
+            ["quality"]["comparison"]["lines"])
+        self.assertNotEqual(alone, referenced)
+        self.assertNotIn("no reference value", referenced)
+        self.assertIn("could not be built", referenced)
+
+    def test_an_unknown_reference_is_reported_unavailable_not_ignored(self):
+        # Consistent with /api/benchmark: an unrecognised reference comes back
+        # unavailable with a reason rather than silently reading as "none".
+        query = ("release=testrel&measure=foreign_born_share&level=county"
+                 "&areas=36005")
+        lines = " ".join(
+            self.get(f"/api/quality?{query}&benchmark=not_a_reference")
+            ["quality"]["comparison"]["lines"])
+        self.assertIn("could not be built", lines)
+
     def test_no_endpoint_leaks_a_configured_credential(self):
         secret = "SECRET-KEY-VALUE-abcdef0123456789"
         with unittest.mock.patch.dict(os.environ, {"CENSUS_API_KEY": secret}):

@@ -146,6 +146,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 .static-note ul { margin: var(--s2) 0 0; padding-left: 18px; }
 .static-note li { margin-bottom: 3px; }
 
+.link-note {
+  background: var(--warn-soft); border-bottom: 1px solid #e6cfae;
+  color: var(--warn); padding: var(--s2) var(--s4); font-size: 12.5px;
+  display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap;
+}
+.link-note strong { font-weight: 650; }
+.link-note .btn { margin-left: auto; }
+
 .startup { padding: var(--s6) var(--s4); }
 
 .save-panel {

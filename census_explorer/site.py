@@ -75,6 +75,57 @@ UNSUPPORTED = {
 }
 
 
+class UnsafeOutputDirectory(ValueError):
+    """The build refused to write to the directory it was given."""
+
+
+#: A directory the build may replace has to be empty, absent, or a previous
+#: build of this site. These two files are what identifies one.
+BUILD_MARKERS = ("index.html", "data/manifest.json")
+
+
+def check_out_dir(out_dir: Path, repo_root: Path) -> Path:
+    """Refuse an output directory whose contents are not ours to replace.
+
+    The build writes a whole tree and therefore has to remove what was there
+    before. That makes `--out` the one argument that can destroy work, so it
+    is checked before anything is deleted: a typo names a directory this
+    refuses, and refusing leaves every file in it untouched.
+    """
+    target = Path(out_dir).expanduser()
+    target = (repo_root / target) if not target.is_absolute() else target
+    target = target.resolve()
+    repo_root = Path(repo_root).resolve()
+
+    def refuse(reason: str) -> None:
+        raise UnsafeOutputDirectory(
+            f"refusing to build into {out_dir}: {reason}. Nothing was "
+            "deleted. Choose an empty directory, a new one, or the --out "
+            "directory of a previous build.")
+
+    if target.parent == target:
+        refuse("that is the root of the filesystem")
+    if target == Path.home().resolve():
+        refuse("that is the home directory")
+    if target == repo_root:
+        refuse("that is the repository itself")
+    if target in repo_root.parents:
+        refuse("that directory contains the repository")
+    if (target / ".git").exists():
+        refuse("that directory is a git repository")
+    if not target.exists():
+        return target
+    if not target.is_dir():
+        refuse("that path is a file, not a directory")
+    if not any(target.iterdir()):
+        return target
+    missing = [m for m in BUILD_MARKERS if not (target / m).exists()]
+    if missing:
+        refuse(f"that directory is not empty and is not a previous build "
+               f"of this site (no {', no '.join(missing)})")
+    return target
+
+
 @dataclass
 class BuildReport:
     out_dir: Path
@@ -219,10 +270,34 @@ def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
           log=print) -> BuildReport:
     """Write the whole static site into `out_dir`."""
     repo_root = Path(repo_root).resolve()
-    out_dir = Path(out_dir)
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+    target = check_out_dir(out_dir, repo_root)
+    # Everything is written beside the target and moved into place only once
+    # it is complete, so a build that fails half way leaves the previous
+    # published copy exactly as it was rather than a broken one.
+    staging = target.parent / f".{target.name}.building"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.parent.mkdir(parents=True, exist_ok=True)
+    staging.mkdir(parents=True)
+    try:
+        report = _build_into(staging, repo_root, release_id, data_dir,
+                            base_path, log)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    if target.exists():
+        shutil.rmtree(target)
+    staging.rename(target)
+    return BuildReport(
+        out_dir=target,
+        files=[target / f.relative_to(staging) for f in report.files],
+        bytes_written=report.bytes_written, release_id=report.release_id,
+        measures=report.measures, areas=report.areas)
+
+
+def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
+                data_dir: str, base_path: str, log) -> BuildReport:
+    """Write the site into an empty directory this build owns."""
     files: list[Path] = []
     written = 0
 
