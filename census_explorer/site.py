@@ -22,7 +22,9 @@ absolute filename.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -79,9 +81,65 @@ class UnsafeOutputDirectory(ValueError):
     """The build refused to write to the directory it was given."""
 
 
-#: A directory the build may replace has to be empty, absent, or a previous
-#: build of this site. These two files are what identifies one.
-BUILD_MARKERS = ("index.html", "data/manifest.json")
+#: Written into every manifest, and required of any directory this build is
+#: willing to replace. A file named `manifest.json` proves nothing on its own.
+SITE_MARKER = "Census Explorer — static build"
+
+#: Files a build writes that carry no digest of their own, and so are not in
+#: the digest map. `data/digests.json` cannot contain its own digest, and
+#: `.nojekyll` is empty. Used only to read an inventory written before this
+#: build recorded one explicitly.
+UNDIGESTED_FILES = ("data/digests.json", ".nojekyll")
+
+
+def _contents(target: Path) -> list[str]:
+    """Every file and link inside `target`, as posix paths relative to it.
+
+    `os.walk` with `followlinks=False`, because a symbolic link to a
+    directory would otherwise be walked into and files outside the target
+    counted as if they were in it.
+    """
+    found: list[str] = []
+    for root, dirs, names in os.walk(target, followlinks=False):
+        here = Path(root)
+        # A symbolic link to a directory is an entry in its own right. It is
+        # counted, and not descended into: what it points at is somewhere
+        # else and is not this build's to account for.
+        linked = [d for d in dirs if (here / d).is_symlink()]
+        dirs[:] = [d for d in dirs if d not in linked]
+        for name in linked + names:
+            found.append((here / name).relative_to(target).as_posix())
+    return found
+
+
+def previous_build_inventory(target: Path) -> set[str] | None:
+    """What a previous build of *this* site wrote into `target`, or None.
+
+    Identity is not "there is an index.html". It is: this build's own marker
+    in the manifest it wrote, and a digest file that lists what it wrote. A
+    directory that cannot produce both is not ours to delete.
+    """
+    manifest_path = target / "data" / "manifest.json"
+    digests_path = target / "data" / "digests.json"
+    if not manifest_path.is_file() or not digests_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text("utf-8"))
+        digests = json.loads(digests_path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict) or manifest.get("site") != SITE_MARKER:
+        return None
+    if not isinstance(digests, dict):
+        return None
+    inventory = digests.get("inventory")
+    if isinstance(inventory, list) and inventory:
+        return {str(name) for name in inventory}
+    # Builds before the inventory was recorded listed only digested files.
+    files = digests.get("files")
+    if isinstance(files, dict) and files:
+        return set(files) | set(UNDIGESTED_FILES)
+    return None
 
 
 def check_out_dir(out_dir: Path, repo_root: Path) -> Path:
@@ -91,6 +149,10 @@ def check_out_dir(out_dir: Path, repo_root: Path) -> Path:
     before. That makes `--out` the one argument that can destroy work, so it
     is checked before anything is deleted: a typo names a directory this
     refuses, and refusing leaves every file in it untouched.
+
+    A non-empty directory is accepted only when it is a previous build of
+    this site *and* holds nothing that build did not write. A file someone
+    else put there is reported, not removed.
     """
     target = Path(out_dir).expanduser()
     target = (repo_root / target) if not target.is_absolute() else target
@@ -119,10 +181,17 @@ def check_out_dir(out_dir: Path, repo_root: Path) -> Path:
         refuse("that path is a file, not a directory")
     if not any(target.iterdir()):
         return target
-    missing = [m for m in BUILD_MARKERS if not (target / m).exists()]
-    if missing:
-        refuse(f"that directory is not empty and is not a previous build "
-               f"of this site (no {', no '.join(missing)})")
+    owned = previous_build_inventory(target)
+    if owned is None:
+        refuse("that directory is not empty and is not a previous build of "
+               "this site (no manifest of ours, or no record of what it "
+               "wrote)")
+    unowned = sorted(set(_contents(target)) - owned)
+    if unowned:
+        shown = ", ".join(unowned[:4])
+        more = f" and {len(unowned) - 4} more" if len(unowned) > 4 else ""
+        refuse(f"that directory holds {len(unowned)} file(s) this build did "
+               f"not write ({shown}{more})")
     return target
 
 
@@ -271,28 +340,63 @@ def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
     """Write the whole static site into `out_dir`."""
     repo_root = Path(repo_root).resolve()
     target = check_out_dir(out_dir, repo_root)
-    # Everything is written beside the target and moved into place only once
-    # it is complete, so a build that fails half way leaves the previous
-    # published copy exactly as it was rather than a broken one.
-    staging = target.parent / f".{target.name}.building"
-    if staging.exists():
-        shutil.rmtree(staging)
-    staging.parent.mkdir(parents=True, exist_ok=True)
-    staging.mkdir(parents=True)
+    # Written beside the target, in a directory this build creates and
+    # therefore owns. A fixed name would let one build delete another's work
+    # in progress, or a directory that merely happened to have that name.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{target.name}.building-",
+                                    dir=target.parent))
     try:
         report = _build_into(staging, repo_root, release_id, data_dir,
                             base_path, log)
+        _replace_directory(staging, target)
     except BaseException:
+        # Only the directory this build made is removed.
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    if target.exists():
-        shutil.rmtree(target)
-    staging.rename(target)
     return BuildReport(
         out_dir=target,
         files=[target / f.relative_to(staging) for f in report.files],
         bytes_written=report.bytes_written, release_id=report.release_id,
         measures=report.measures, areas=report.areas)
+
+
+def _replace_directory(staging: Path, target: Path) -> None:
+    """Put `staging` at `target`, keeping the old contents until it is there.
+
+    This is two renames, not one operation, and is not an atomic swap. What
+    it does guarantee is that the previous build is never deleted before the
+    new one is in place, and that a failure at the last step puts the
+    previous one back where it was.
+    """
+    if not target.exists():
+        staging.rename(target)
+        return
+    # The previous build is moved inside a directory this build creates, so
+    # there is no name to race for and nothing else can be holding it.
+    holding = Path(tempfile.mkdtemp(prefix=f".{target.name}.previous-",
+                                    dir=target.parent))
+    kept = holding / target.name
+    target.rename(kept)
+    try:
+        staging.rename(target)
+    except BaseException:
+        if not target.exists():
+            try:
+                kept.rename(target)
+            except OSError as restore_failed:
+                # Recovery uses the operation that just failed, so it can
+                # fail too. What must never happen is losing the previous
+                # build quietly: it stays where it is and the message says
+                # where that is.
+                raise RuntimeError(
+                    f"the new build could not be moved into {target}, and "
+                    f"the previous one could not be put back. It is intact "
+                    f"at {kept} — move it back by hand."
+                ) from restore_failed
+        shutil.rmtree(holding, ignore_errors=True)
+        raise
+    shutil.rmtree(holding, ignore_errors=True)
 
 
 def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
@@ -432,7 +536,7 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
 
     # -- the manifest a reader can check the site against ------------------
     manifest = {
-        "site": "Census Explorer — static build",
+        "site": SITE_MARKER,
         "generated_at": provenance.utc_now(),
         "code_revision": dataset.get("code_revision"),
         "data_mode": data_mode,
@@ -486,10 +590,19 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
         if path.suffix in (".json", ".js", ".css", ".html"):
             digests[path.relative_to(out_dir).as_posix()] = \
                 provenance.sha256_bytes(path.read_bytes())
+    # The inventory is what makes a later build willing to replace this one:
+    # it names every file written, including the ones that carry no digest.
+    inventory = sorted({path.relative_to(out_dir).as_posix() for path in files}
+                       | {"data/digests.json"})
     written += _write(data / "digests.json", {
         "algorithm": "sha256",
         "note": ("Content digests of every file this build wrote, so a "
                  "published copy can be compared against it."),
+        "inventory_note": ("Every file this build wrote, digested or not. A "
+                           "later build refuses to replace this directory if "
+                           "it holds anything not listed here."),
+        "site": SITE_MARKER,
+        "inventory": inventory,
         "files": digests,
     }, files)
 

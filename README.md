@@ -34,7 +34,7 @@ no telemetry, and the local service holds no credentials.
 | Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 370 tests, no network |
+| Offline test suite | Working: 381 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, with shareable views and printable briefs; saved projects and export bundles still require the local app. See `docs/DEPLOY.md` |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |

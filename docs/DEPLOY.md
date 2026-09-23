@@ -55,6 +55,32 @@ reference in the page is relative, so the same output works at any path.
 `site/` is ignored by git on purpose: the build output does not belong in the
 source history.
 
+### What `--out` will and will not replace
+
+The build writes a whole tree, so it has to remove what was there before.
+That makes `--out` the one argument that can destroy work, and it is checked
+before anything is deleted.
+
+It refuses the filesystem root, a home directory, the repository, any
+directory that contains the repository, a git checkout, and a path that is a
+file. It accepts a directory that does not exist or is empty.
+
+A non-empty directory is accepted only when it is a previous build of *this*
+site — proved by this project's own marker in `data/manifest.json` and the
+inventory in `data/digests.json`, not by the presence of a file called
+`index.html` — **and** holds nothing that build did not write. A file you put
+there yourself is named in the refusal, not removed. Delete or move it if you
+want the directory rebuilt.
+
+The new site is written into a directory the build creates for itself beside
+the target, so two builds cannot delete each other's work in progress and a
+directory that merely happens to have a similar name is never touched. When
+the new tree is complete, the previous build is moved aside and the new one
+renamed into place. That is two renames, not an atomic swap: what it
+guarantees is that the previous build is never deleted before the new one is
+in place, and that a failure at the last step puts it back. If even that
+cannot be done, the build stops and tells you where the previous copy is.
+
 ### Check it before publishing
 
 ```powershell

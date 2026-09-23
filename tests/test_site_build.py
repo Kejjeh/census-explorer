@@ -138,6 +138,13 @@ class OutputDirectoryTests(_Built):
         self.assertIn(fragment, message)
         self.assertIn("Nothing was deleted", message)
 
+    def staging_siblings(self, target: Path) -> list[str]:
+        return sorted(p.name for p in target.parent.iterdir()
+                      if p.name.startswith(f".{target.name}.")
+                      and p.name != target.name)
+
+    # -- refusing what is not ours -------------------------------------
+
     def test_a_directory_with_someone_else_s_files_is_refused_untouched(self):
         target = self.keeper("not-ours")
         self.assert_refused(target, "not a previous build")
@@ -163,6 +170,135 @@ class OutputDirectoryTests(_Built):
         self.assert_refused(target, "a file, not a directory")
         self.assertEqual(target.read_text("utf-8"), "not a directory")
 
+    # -- proving a previous build, not just guessing --------------------
+
+    def test_a_directory_that_merely_looks_like_a_build_is_refused(self):
+        # An index.html and a file called manifest.json prove nothing.
+        target = self.root / "lookalike"
+        (target / "data").mkdir(parents=True)
+        (target / "index.html").write_text("<html>", encoding="utf-8")
+        (target / "data" / "manifest.json").write_text(
+            '{"site": "something else"}', encoding="utf-8")
+        self.assert_refused(target, "not a previous build")
+        self.assertTrue((target / "index.html").is_file())
+
+    def test_a_build_without_its_record_of_what_it_wrote_is_refused(self):
+        target = self.root / "no-record"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        (target / "data" / "digests.json").unlink()
+        self.assert_refused(target, "no record of what it wrote")
+        self.assertTrue((target / "data" / "manifest.json").is_file())
+
+    def test_a_file_the_build_did_not_write_is_reported_not_removed(self):
+        target = self.root / "edited"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        stray = target / "notes.md"
+        stray.write_text("my working notes", encoding="utf-8")
+        (target / "data" / "extra").mkdir()
+        (target / "data" / "extra" / "of-mine.json").write_text("{}", encoding="utf-8")
+        with self.assertRaises(site.UnsafeOutputDirectory) as caught:
+            site.build(self.root, target, "testrel", log=lambda *a: None)
+        message = str(caught.exception)
+        self.assertIn("this build did not write", message)
+        self.assertIn("notes.md", message)
+        self.assertEqual(stray.read_text("utf-8"), "my working notes")
+        self.assertTrue((target / "data" / "extra" / "of-mine.json").is_file())
+
+    def test_a_symbolic_link_left_in_the_target_is_reported_not_followed(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("no symbolic links on this platform")
+        target = self.root / "linked"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        outside = self.keeper("outside")
+        try:
+            (target / "elsewhere").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("this platform does not allow creating symbolic links")
+        with self.assertRaises(site.UnsafeOutputDirectory) as caught:
+            site.build(self.root, target, "testrel", log=lambda *a: None)
+        message = str(caught.exception)
+        self.assertIn("elsewhere", message)
+        # Counted as one entry, not walked into: the file it points at is
+        # somewhere else and is not this build's to account for.
+        self.assertNotIn("important.txt", message)
+        self.assertEqual((outside / "important.txt").read_text("utf-8"), "keep me")
+
+    def test_a_build_written_before_inventories_is_still_recognised(self):
+        target = self.root / "older-build"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        digests_path = target / "data" / "digests.json"
+        older = json.loads(digests_path.read_text("utf-8"))
+        older.pop("inventory")
+        digests_path.write_text(json.dumps(older), encoding="utf-8")
+        report = site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertTrue((report.out_dir / "index.html").is_file())
+
+    def test_the_inventory_names_every_file_the_build_wrote(self):
+        digests = self.data("digests.json")
+        self.assertEqual(digests["site"], site.SITE_MARKER)
+        self.assertEqual(set(digests["inventory"]), set(site._contents(self.out)))
+        for name in ("index.html", ".nojekyll", "data/digests.json",
+                     "data/manifest.json"):
+            self.assertIn(name, digests["inventory"], name)
+
+    # -- the staging directory is this build's own ----------------------
+
+    def test_a_directory_named_like_the_staging_one_is_left_alone(self):
+        # The staging path used to be a fixed sibling name, deleted on sight.
+        target = self.root / "site"
+        squatter = self.root / ".site.building"
+        squatter.mkdir()
+        (squatter / "important.txt").write_text("not yours", encoding="utf-8")
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertEqual((squatter / "important.txt").read_text("utf-8"),
+                         "not yours")
+
+    def test_a_failed_build_leaves_that_directory_alone_too(self):
+        from unittest.mock import patch
+        target = self.root / "site-failing"
+        squatter = self.root / ".site-failing.building"
+        squatter.mkdir()
+        (squatter / "important.txt").write_text("not yours", encoding="utf-8")
+        with patch("census_explorer.site.server.measure_catalog",
+                   side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertEqual((squatter / "important.txt").read_text("utf-8"),
+                         "not yours")
+        self.assertFalse(target.exists())
+
+    def test_two_builds_in_flight_do_not_delete_each_other(self):
+        # Both aim at the same output directory, which is what made a fixed
+        # staging name collide: the second build deleted the first one's
+        # work in progress before writing its own.
+        from unittest.mock import patch
+        target = self.root / "shared-target"
+        other = target
+        real = site._build_into
+        seen = {"staging": [], "sentinel_survived": None}
+
+        def nested(out_dir, *args, **kwargs):
+            seen["staging"].append(out_dir)
+            if len(seen["staging"]) == 1:
+                sentinel = out_dir / "in-progress.txt"
+                sentinel.write_text("outer build's work", encoding="utf-8")
+                # Still patched, so the inner build records its own staging
+                # path; the depth check keeps it from recursing again.
+                site.build(self.root, other, "testrel", log=lambda *a: None)
+                seen["sentinel_survived"] = sentinel.is_file()
+            return real(out_dir, *args, **kwargs)
+
+        with patch.object(site, "_build_into", nested):
+            site.build(self.root, target, "testrel", log=lambda *a: None)
+
+        self.assertTrue(seen["sentinel_survived"],
+                        "a second build deleted the first one's staging area")
+        self.assertNotEqual(seen["staging"][0], seen["staging"][1],
+                            "two builds shared one staging directory")
+        self.assertTrue((target / "index.html").is_file())
+
+    # -- replacing, and putting it back ---------------------------------
+
     def test_an_empty_directory_is_accepted(self):
         target = self.root / "empty-out"
         target.mkdir()
@@ -172,11 +308,15 @@ class OutputDirectoryTests(_Built):
     def test_a_previous_build_is_replaced(self):
         target = self.root / "again"
         site.build(self.root, target, "testrel", log=lambda *a: None)
-        (target / "data" / "values" / "left-over.json").write_text("{}", encoding="utf-8")
+        leftover = target / "data" / "values" / "left-over.json"
+        leftover.write_text("{}", encoding="utf-8")
+        # Written by nobody, so the next build refuses until it is gone.
+        self.assert_refused(target, "this build did not write")
+        leftover.unlink()
         site.build(self.root, target, "testrel", log=lambda *a: None)
-        self.assertFalse((target / "data" / "values" / "left-over.json").exists(),
-                         "a rebuild left a file from the previous build behind")
+        self.assertFalse(leftover.exists())
         self.assertTrue((target / "data" / "manifest.json").is_file())
+        self.assertEqual(self.staging_siblings(target), [])
 
     def test_a_build_that_fails_leaves_the_previous_copy_alone(self):
         from unittest.mock import patch
@@ -184,13 +324,53 @@ class OutputDirectoryTests(_Built):
         site.build(self.root, target, "testrel", log=lambda *a: None)
         before = (target / "data" / "manifest.json").read_bytes()
         with patch("census_explorer.site.server.measure_catalog",
-                    side_effect=RuntimeError("boom")):
+                   side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 site.build(self.root, target, "testrel", log=lambda *a: None)
         self.assertEqual((target / "data" / "manifest.json").read_bytes(), before)
-        leftovers = [p.name for p in target.parent.iterdir()
-                     if p.name.startswith(".") and p.name.endswith(".building")]
-        self.assertEqual(leftovers, [], "a failed build left its staging directory")
+        self.assertEqual(self.staging_siblings(target), [])
+
+    def test_a_failed_replacement_puts_the_previous_build_back(self):
+        from unittest.mock import patch
+        target = self.root / "rollback"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        before = (target / "data" / "manifest.json").read_bytes()
+        real_rename = Path.rename
+        attempts = {"n": 0}
+
+        def flaky(self_path, destination):
+            if Path(destination) == target:
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    raise OSError("the filesystem refused the rename")
+            return real_rename(self_path, destination)
+
+        with patch.object(Path, "rename", flaky):
+            with self.assertRaises(OSError):
+                site.build(self.root, target, "testrel", log=lambda *a: None)
+        self.assertTrue(target.is_dir(), "the previous build was not put back")
+        self.assertEqual((target / "data" / "manifest.json").read_bytes(), before)
+        self.assertEqual(self.staging_siblings(target), [])
+
+    def test_a_replacement_that_cannot_be_undone_says_where_the_copy_is(self):
+        from unittest.mock import patch
+        target = self.root / "stuck"
+        site.build(self.root, target, "testrel", log=lambda *a: None)
+        real_rename = Path.rename
+
+        def always_fail(self_path, destination):
+            if Path(destination) == target:
+                raise OSError("the filesystem refused the rename")
+            return real_rename(self_path, destination)
+
+        with patch.object(Path, "rename", always_fail):
+            with self.assertRaises(RuntimeError) as caught:
+                site.build(self.root, target, "testrel", log=lambda *a: None)
+        message = str(caught.exception)
+        self.assertIn("could not be put back", message)
+        kept = message.split("intact at ")[1].split(" —")[0]
+        # Never lost quietly: the message names where it actually is.
+        self.assertTrue((Path(kept) / "data" / "manifest.json").is_file())
 
     def test_the_report_names_the_directory_the_caller_asked_for(self):
         target = self.root / "named"

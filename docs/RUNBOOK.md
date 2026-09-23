@@ -33,7 +33,7 @@ python -m unittest discover -s tests -t .
 Expected:
 
 ```
-Ran 370 tests in 17.1s
+Ran 381 tests in 17.2s
 OK (skipped=3)
 ```
 

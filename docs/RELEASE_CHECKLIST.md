@@ -24,14 +24,14 @@ one, and what is still open. Written to be checked, not to reassure.
 
 | | State |
 | --- | --- |
-| Offline test suite | 370 tests, 3 skips on Linux (live network); more on Windows |
+| Offline test suite | 381 tests, 3 skips on Linux (live network); more on Windows |
 | Data | Official ACS 2019-2023 five-year aggregates for the five boroughs and their census tracts, built from a recorded manifest |
 | Published copy computes nothing | Every estimate, margin of error, CV, reliability wording, denominator and reference is computed by the Python during the build; a round-trip test compares the page's uncertainty panels and CSV against the service's own output |
 | CSV | Byte-identical to the local exporter for the same selection, checked against the real dataset at borough and tract scope |
 | Printable brief | Generated in the browser from the published snapshot; its table is capped at 25 rows in GEOID order and says so; the CSV keeps every selected row |
 | Share links | Restore release, measure, level, scope, inspected place, comparison and reference; refuse a link from a different published snapshot; exclude zoom and table sort |
 | Integrity | Every published data file is checked against a SHA-256 recorded in the page before it is used |
-| Output directory | `--out` refuses the filesystem root, a home directory, the repository, a directory containing it, a git checkout, a file, and any non-empty directory that is not a previous build; a failed build leaves the previous copy intact |
+| Output directory | `--out` refuses the filesystem root, a home directory, the repository, a directory containing it, a git checkout, a file, any non-empty directory that is not a previous build of this site, and any previous build that holds a file this build did not write. Staging is a uniquely created directory, so one build cannot delete another's work. The previous build is kept until the new one is in place, and put back if the last step fails |
 | Starting examples | Three, resolved against the build, each naming its measure, denominator, places, period and what it does not say |
 | Saved views and export bundles | Local service only, and the published copy says so rather than approximating them |
 | Comparing two reference periods | Blocked at every level; boundary equivalence between vintages is not established |
