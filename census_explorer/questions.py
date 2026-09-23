@@ -332,6 +332,126 @@ def base_limitations(question: Question, level: str) -> list[str]:
     return out
 
 
+@dataclass(frozen=True)
+class Starter:
+    """One worked example a first-time reader can open.
+
+    A starter names a measure the catalog already defines and places the
+    project configuration already lists. It invents nothing: the wording a
+    card shows is the measure's own `label`, `counts_what` and `out_of`,
+    resolved from the built dataset, so a card cannot describe a quantity the
+    measure does not compute.
+    """
+
+    starter_id: str
+    title: str                       # the question, in a reader's words
+    level: str
+    measure_id: str
+    #: County keys from `first_project.modern_counties`, never bare GEOIDs.
+    #: An empty tuple means every area at this level.
+    scope_counties: tuple[str, ...]
+    compare_counties: tuple[str, ...]
+    inspect_county: str | None
+    benchmark: str
+    caution: str                     # what this view does not say
+
+
+#: Three ways in, one per shape of question this build can actually answer.
+#: Each is a starting point, not a finding: the card says what the measure
+#: counts, what it is out of, and what it does not say.
+STARTERS: tuple[Starter, ...] = (
+    Starter(
+        starter_id="one_place",
+        title="Who lives in one borough?",
+        level="county",
+        measure_id="foreign_born_share",
+        scope_counties=("005",),
+        compare_counties=(),
+        inspect_county="005",
+        benchmark="nyc",
+        caution=("Place of birth is a count of where residents were born. It "
+                 "does not say when anyone arrived, or whether they moved "
+                 "here at all."),
+    ),
+    Starter(
+        starter_id="two_places",
+        title="How do two boroughs compare?",
+        level="county",
+        measure_id="naturalized_share_of_foreign_born",
+        scope_counties=(),
+        compare_counties=("005", "081"),
+        inspect_county="005",
+        benchmark="nyc",
+        caution=("A difference between two estimates is not tested for "
+                 "statistical significance anywhere in this build. Read both "
+                 "margins of error."),
+    ),
+    Starter(
+        starter_id="birthplace_group",
+        title="Where do residents born in one country live?",
+        level="tract",
+        measure_id="fb_dominican_republic_share_of_foreign_born",
+        scope_counties=(),
+        compare_counties=(),
+        inspect_county=None,
+        benchmark="nyc",
+        caution=("Census tracts are statistical areas published by the Census "
+                 "Bureau, not neighbourhoods. A birthplace share describes "
+                 "where residents live now, not a settlement history."),
+    ),
+)
+
+
+def starters(dataset: dict[str, Any], county_geoid,
+             levels: dict[str, Any]) -> list[dict]:
+    """The starters this build can actually open, with their own wording.
+
+    A starter is dropped rather than adjusted when the build does not carry
+    its level, its measure at that level, or one of its places. A card that
+    opened something other than what it described would be worse than no
+    card at all.
+    """
+    out = []
+    by_level = {lv: {o.measure_id: o for o in catalog(dataset, lv)}
+                for lv in levels}
+    names = {a["geoid"]: a["name"] for a in dataset.get("areas", [])}
+    present = {lv: {a["geoid"] for a in dataset.get("areas", [])
+                    if a["level"] == lv} for lv in levels}
+
+    for starter in STARTERS:
+        if starter.level not in levels:
+            continue
+        option = by_level.get(starter.level, {}).get(starter.measure_id)
+        if option is None:
+            continue
+        scope = [county_geoid(c) for c in starter.scope_counties]
+        compare = [county_geoid(c) for c in starter.compare_counties]
+        inspect = (county_geoid(starter.inspect_county)
+                   if starter.inspect_county else None)
+        named = [g for g in (*scope, *compare, *([inspect] if inspect else []))]
+        if any(g not in present[starter.level] for g in named):
+            continue
+        out.append({
+            "starter_id": starter.starter_id,
+            "title": starter.title,
+            "level": starter.level,
+            "level_label": levels[starter.level]["label"],
+            "measure_id": option.measure_id,
+            "measure_label": option.label,
+            "counts_what": option.counts_what,
+            "out_of": option.out_of,
+            "unit": option.unit,
+            "areas": scope,
+            "area_names": [names.get(g, g) for g in scope],
+            "compare": compare,
+            "compare_names": [names.get(g, g) for g in compare],
+            "pick": inspect,
+            "benchmark": starter.benchmark,
+            "caution": starter.caution,
+        })
+    return out
+
+
 def catalog(dataset: dict[str, Any], level: str) -> list[MeasureOption]:
     """Every option the built dataset carries at `level`, in sidebar order.
 

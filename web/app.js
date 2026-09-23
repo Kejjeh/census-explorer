@@ -33,6 +33,8 @@ const state = {
   placeQuery: '',
   view: { k: 1, x: 0, y: 0 },
   loading: false,
+  //: True when a shared link chose this view, so onboarding leaves it alone.
+  sharedApplied: false,
   //: True only while the values, geometry, quality and reference on screen all
   //: came from one completed load of the selection now shown. Saving and
   //: exporting are refused until then, because both write the selection to
@@ -292,6 +294,7 @@ async function boot() {
       state.level = shared.level; state.measureId = shared.measure;
       state.areas = [...shared.areas]; state.benchmarkId = shared.benchmark;
       state.pick = shared.pick; state.compare = [...shared.compare];
+      state.sharedApplied = true;
     } else if (linkProblem) {
       // Drop the hash so a reload does not fail the same way, and so the
       // address bar stops promising a selection that is not on screen.
@@ -305,6 +308,10 @@ async function boot() {
   wireControls();
   renderLevelSwitch();
   renderSidebar();
+  // A link that chose a view has already said what to show; onboarding must
+  // not talk over it. Nothing here ever changes the selection on its own —
+  // a card is a button — but the panel stays out of the way regardless.
+  renderStarters({ open: !state.sharedApplied });
   updateActions();
   $('startup').hidden = true;
   $('shell').hidden = false;
@@ -392,6 +399,8 @@ function wireControls() {
     await refresh();
   });
   $('btn-method').addEventListener('click', () => toggleDrawer());
+  $('btn-starters').addEventListener('click', () => toggleStarters());
+  $('starters-dismiss').addEventListener('click', () => toggleStarters(false));
   if (STATIC) $('btn-save').replaceWith($('btn-save').cloneNode(true));
   $('drawer-close').addEventListener('click', () => toggleDrawer(false));
   $('btn-export').addEventListener('click', doExport);
@@ -680,6 +689,7 @@ async function loadBenchmarks() {
 /** Saving and exporting write the shown selection to disk; both wait for it. */
 function updateActions() {
   const usable = state.ready && !state.loading;
+  document.querySelectorAll('.starter').forEach((b) => { b.disabled = state.loading; });
   $('btn-export').disabled = !usable;
   // Exports and briefs require a single completed selection.
   $('btn-brief').disabled = !usable;
@@ -893,6 +903,106 @@ function coverageNote() {
     nounPlural: state.level === 'county' ? 'boroughs' : 'census tracts',
     vintage: state.dataset.release.boundary_release,
   });
+}
+
+/**
+ * Three worked examples, for a reader who has not met this data before.
+ *
+ * Each card is a button that opens one example through the ordinary
+ * selection and load path — the same one the sidebar and the place search
+ * use — so what appears afterwards is a normal view with its denominator,
+ * period, coverage and uncertainty on screen, and every control still doing
+ * what it did. The cards describe themselves from the catalog: the measure's
+ * own label, what it counts, and what it is out of. Nothing here computes
+ * anything.
+ */
+function renderStarters(opts = {}) {
+  const host = $('starters-list');
+  const panel = $('starters');
+  const available = state.catalog.starters || [];
+  if (!available.length) {
+    panel.hidden = true;
+    $('btn-starters').hidden = true;
+    return;
+  }
+  $('starters-intro').textContent =
+    `Examples built from this release, ${state.catalog.period_label}. ` +
+    'Opening one selects it; nothing is saved and every control still works.';
+  $('starters-outro').textContent =
+    'These are starting points, not findings. Change the place with the ' +
+    `search above the map, or choose any of the ${levelInfo().measure_count} ` +
+    'measures in the list on the left.';
+  host.textContent = '';
+  available.forEach((starter) => {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'starter';
+    b.dataset.starter = starter.starter_id;
+    const where = starter.areas.length
+      ? starter.area_names.join(' and ')
+      : `all ${starter.level_label.toLowerCase()}`;
+    const compared = starter.compare_names.length
+      ? `, comparing ${starter.compare_names.join(' and ')}` : '';
+    const outOf = starter.unit === 'percent'
+      ? `Percent of ${starter.out_of}.` : 'A number of people, not a share.';
+    b.innerHTML =
+      `<span class="s-title">${esc(starter.title)}</span>` +
+      `<span class="s-measure">${esc(starter.measure_label)}</span>` +
+      `<span class="s-meta">Counts ${esc(starter.counts_what)}. ${esc(outOf)}</span>` +
+      `<span class="s-meta">Opens ${esc(where)}${esc(compared)}, ` +
+      `${esc(state.catalog.period_label)}.</span>` +
+      `<span class="s-caution">${esc(starter.caution)}</span>`;
+    b.addEventListener('click', () => openStarter(starter));
+    li.appendChild(b);
+    host.appendChild(li);
+  });
+  if (opts.open !== undefined) setStartersOpen(opts.open);
+  updateActions();
+}
+
+function setStartersOpen(open) {
+  $('starters').hidden = !open;
+  $('btn-starters').setAttribute('aria-expanded', String(open));
+}
+
+function toggleStarters(force) {
+  const open = force === undefined ? $('starters').hidden : force;
+  // Re-rendered on open so the count of measures matches the level in view.
+  if (open) renderStarters();
+  setStartersOpen(open);
+  if (open) {
+    $('starters').scrollIntoView({ block: 'nearest' });
+    // Opened deliberately, from a control in the sidebar: put focus in the
+    // panel rather than leaving it several stops away from what appeared.
+    const first = $('starters-list').querySelector('.starter');
+    if (first) first.focus();
+  } else {
+    $('btn-starters').focus();
+  }
+}
+
+async function openStarter(starter) {
+  if (state.loading) return;
+  state.level = starter.level;
+  state.measureId = starter.measure_id;
+  state.areas = [...starter.areas];
+  state.compare = [...starter.compare];
+  state.pick = starter.pick;
+  state.benchmarkId = starter.benchmark;
+  state.measureFilter = '';
+  $('measure-search').value = '';
+  state.placeQuery = '';
+  $('place-search').value = '';
+  closePlaceResults();
+  fitMap();
+  renderLevelSwitch();
+  renderSidebar();
+  await loadBenchmarks();
+  await refresh();
+  setStartersOpen(false);
+  // Land the reader on the answer rather than back at the top of the page.
+  $('measure-title').focus();
 }
 
 /** The heading names the measure that was asked for, loaded or not. */

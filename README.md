@@ -34,7 +34,7 @@ no telemetry, and the local service holds no credentials.
 | Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 342 tests, no network |
+| Offline test suite | Working: 370 tests, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, with shareable views and printable briefs; saved projects and export bundles still require the local app. See `docs/DEPLOY.md` |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
@@ -266,6 +266,11 @@ one rather than failing.
 - **Coverage is stated for the selection, not the build.** How many areas in
   view could not be drawn is separate from how many the whole build cannot
   draw, and a view that drew everything does not inherit the second number.
+- **A starting example is a starting point, not a finding.** Each of the
+  three cards borrows the catalog's own wording for what its measure counts
+  and what it is out of, names the places and period it opens, and says what
+  the view does not say. A card whose measure or place this build does not
+  carry is dropped rather than adjusted to something else.
 - **A published copy computes nothing.** The static build runs this
   repository's Python once and writes what it produced; the page reshapes and
   counts, and a round-trip test compares its uncertainty panels and its CSV
@@ -300,6 +305,8 @@ artifacts/           git-ignored: export bundles
 - [Usage and verification](docs/USAGE.md): every command, with expected output.
 - [Publishing](docs/DEPLOY.md): the static build, exactly what it contains,
   what a published copy cannot do, and the steps to put it on GitHub Pages.
+- [Release checklist](docs/RELEASE_CHECKLIST.md): what has to be true before
+  publishing, what is true now, and what is still open.
 - [Data handling decisions](docs/DATA_HANDLING.md): universes, denominators,
   annotations, margins of error, geography and comparison rules.
 - [Dependencies](docs/DEPENDENCIES.md): what is used, and the open decision.

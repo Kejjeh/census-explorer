@@ -761,6 +761,13 @@ def measure_catalog(state: ServiceState, release_id: str) -> dict:
         "product_label": dataset["release"]["product_label"],
         "levels": levels,
         "level_order": [lv for lv in LEVEL_LABELS if lv in levels],
+        # Worked examples a first-time reader can open. Each one resolves
+        # against this build, so a card is offered only when the measure and
+        # every place it names are actually here.
+        "starters": questions_mod.starters(
+            dataset,
+            lambda key: f"{state.config.state_fips}{key}",
+            levels),
     }
 
 

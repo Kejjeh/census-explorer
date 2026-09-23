@@ -257,5 +257,159 @@ class CatalogPayloadTests(_Fixture):
                 self.assertIn(m["unit"], ("percent", "persons"))
 
 
+# ---------------------------------------------------------------------------
+# 6. The starting examples describe what they actually open
+# ---------------------------------------------------------------------------
+
+class StarterTests(_Fixture):
+    def setUp(self):
+        super().setUp()
+        self.payload = server.measure_catalog(self.state, "testrel")
+        self.offered = self.payload["starters"]
+
+    def options(self, level):
+        return {o.measure_id: o for o in questions.catalog(self.dataset, level)}
+
+    def test_every_offered_starter_opens_a_measure_this_build_carries(self):
+        self.assertTrue(self.offered, "no starting example was offered")
+        for starter in self.offered:
+            self.assertIn(starter["level"], self.payload["levels"])
+            self.assertIn(starter["measure_id"], self.options(starter["level"]),
+                          f"{starter['starter_id']} opens a measure the "
+                          f"{starter['level']} level does not offer")
+
+    def test_every_place_a_starter_names_exists_at_that_level(self):
+        for starter in self.offered:
+            present = {a["geoid"] for a in self.dataset["areas"]
+                       if a["level"] == starter["level"]}
+            named = [*starter["areas"], *starter["compare"]]
+            if starter["pick"]:
+                named.append(starter["pick"])
+            for geoid in named:
+                self.assertIn(geoid, present,
+                              f"{starter['starter_id']} names {geoid}, which "
+                              f"is not in this build at {starter['level']}")
+
+    def test_a_starter_names_the_places_it_opens(self):
+        for starter in self.offered:
+            self.assertEqual(len(starter["area_names"]), len(starter["areas"]))
+            self.assertEqual(len(starter["compare_names"]), len(starter["compare"]))
+            for name in (*starter["area_names"], *starter["compare_names"]):
+                self.assertTrue(name.strip())
+
+    def test_a_starter_borrows_the_catalog_s_own_wording(self):
+        # A card must not paraphrase a measure. If the catalog says what it
+        # counts and what it is out of, that is what the card says.
+        for starter in self.offered:
+            option = self.options(starter["level"])[starter["measure_id"]]
+            self.assertEqual(starter["measure_label"], option.label)
+            self.assertEqual(starter["counts_what"], option.counts_what)
+            self.assertEqual(starter["out_of"], option.out_of)
+            self.assertEqual(starter["unit"], option.unit)
+
+    def test_a_share_starter_names_a_denominator_and_a_count_does_not(self):
+        for starter in self.offered:
+            if starter["unit"] == "percent":
+                self.assertTrue(starter["out_of"].strip(), starter["starter_id"])
+            else:
+                self.assertEqual(starter["out_of"], "", starter["starter_id"])
+
+    def test_every_starter_says_what_its_view_does_not_say(self):
+        for starter in self.offered:
+            self.assertTrue(starter["caution"].strip(), starter["starter_id"])
+
+    def test_no_starter_names_a_population_this_data_does_not_identify(self):
+        # These words are wrong here whatever the sentence around them: the
+        # tables record place of birth and citizenship at birth, not ancestry,
+        # not descent, and not immigration status.
+        never = ("immigrant", "immigration", "migrant", "ancestry",
+                 "descent", "heritage", "city-born", "born in new york city")
+        for starter in self.offered:
+            text = " ".join([starter["title"], starter["measure_label"],
+                             starter["counts_what"], starter["out_of"],
+                             starter["caution"]]).lower()
+            for word in never:
+                self.assertNotIn(word, text,
+                                 f"{starter['starter_id']} says '{word}'")
+
+    def test_no_starter_headline_asserts_a_trend_or_a_cause(self):
+        # The caution is exempt on purpose: it is where a starter says what
+        # the view does *not* show, so it may name the thing it rules out.
+        import re as _re
+        claims = ("increase", "decrease", "growth", "decline", "rising",
+                  "falling", "trend", "influx", "wave", "because", "caused",
+                  "drove", "led to", "gentrif", "displace", "over time")
+        for starter in self.offered:
+            headline = f"{starter['title']} {starter['measure_label']}".lower()
+            for word in claims:
+                self.assertIsNone(
+                    _re.search(rf"\b{word}", headline),
+                    f"{starter['starter_id']} headline says '{word}'")
+
+    def test_a_place_of_birth_starter_says_it_is_not_a_record_of_a_move(self):
+        # Decided by the published concept, not by the word "born" appearing
+        # in a label: a naturalisation share is a citizenship measure and
+        # carries a different caution.
+        concepts = {m["measure_id"]: m.get("concept", "")
+                    for m in self.dataset["measures"]}
+        for starter in self.offered:
+            concept = concepts.get(starter["measure_id"], "").lower()
+            if "place of birth" not in concept and "nativity" not in concept:
+                continue
+            caution = starter["caution"].lower()
+            self.assertTrue(
+                "not a settlement history" in caution
+                or "does not say when" in caution
+                or "not a record" in caution,
+                f"{starter['starter_id']} does not separate a birthplace "
+                "count from a move")
+
+    def test_a_tract_starter_says_tracts_are_not_neighbourhoods(self):
+        for starter in self.offered:
+            if starter["level"] != "tract":
+                continue
+            self.assertIn("not neighbourhood", starter["caution"].lower(),
+                          starter["starter_id"])
+
+    def test_a_comparison_starter_refuses_to_imply_significance(self):
+        for starter in self.offered:
+            if not starter["compare"]:
+                continue
+            self.assertIn("statistical significance",
+                          starter["caution"].lower(), starter["starter_id"])
+
+    def test_a_starter_asks_only_for_a_reference_its_level_offers(self):
+        from census_explorer import benchmark as benchmark_mod
+        for starter in self.offered:
+            options = {o["benchmark_id"] for o in benchmark_mod.options(
+                starter["level"], starter["areas"],
+                self.state.config.county_geoids, {})}
+            self.assertIn(starter["benchmark"], options, starter["starter_id"])
+
+    def test_a_level_this_build_lacks_takes_its_starters_with_it(self):
+        # The fixture project has no tract level, so the tract example must
+        # not be offered rather than opening something else.
+        self.assertNotIn("tract", self.payload["levels"])
+        self.assertNotIn("birthplace_group",
+                         {s["starter_id"] for s in self.offered})
+
+    def test_a_starter_whose_measure_is_missing_is_dropped_not_adjusted(self):
+        thinned = dict(self.dataset)
+        thinned["measures"] = [m for m in self.dataset["measures"]
+                               if m["measure_id"] != "foreign_born_share"]
+        offered = questions.starters(
+            thinned, lambda key: f"36{key}", self.payload["levels"])
+        self.assertNotIn("one_place", {s["starter_id"] for s in offered})
+
+    def test_a_starter_whose_place_is_missing_is_dropped_not_adjusted(self):
+        thinned = dict(self.dataset)
+        thinned["areas"] = [a for a in self.dataset["areas"]
+                            if a["geoid"] != "36005"]
+        offered = questions.starters(
+            thinned, lambda key: f"36{key}", self.payload["levels"])
+        self.assertEqual(offered, [],
+                         "a starter opened without the place it names")
+
+
 if __name__ == "__main__":
     unittest.main()

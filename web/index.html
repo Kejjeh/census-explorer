@@ -57,6 +57,9 @@
 
   <aside class="sidebar" aria-label="Topics and measures">
     <div class="sidebar-inner">
+      <button type="button" class="btn starters-toggle" id="btn-starters"
+              aria-controls="starters" aria-expanded="false">Start from a question</button>
+
       <div class="level-switch" role="radiogroup" aria-label="Geography">
         <button type="button" role="radio" data-level="county" aria-checked="true">Boroughs</button>
         <button type="button" role="radio" data-level="tract" aria-checked="false">Census tracts</button>
@@ -83,7 +86,7 @@
   <section class="stage" id="stage" tabindex="-1">
     <div class="stage-head">
       <div class="stage-title">
-        <h1 id="measure-title">—</h1>
+        <h1 id="measure-title" tabindex="-1">—</h1>
         <p class="denominator" id="denominator-line"></p>
       </div>
       <div class="place-find">
@@ -98,6 +101,16 @@
             aria-label="Matching places" hidden></ul>
       </div>
     </div>
+
+    <section id="starters" class="starters" aria-labelledby="starters-title" hidden>
+      <div class="starters-head">
+        <h2 id="starters-title">Three ways to start</h2>
+        <button type="button" class="btn ghost" id="starters-dismiss">Dismiss</button>
+      </div>
+      <p class="muted tiny" id="starters-intro"></p>
+      <ul id="starters-list" class="starters-list"></ul>
+      <p class="muted tiny" id="starters-outro"></p>
+    </section>
 
     <div id="scope-bar" class="scope-bar" aria-live="polite"></div>
 
