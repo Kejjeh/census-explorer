@@ -341,6 +341,21 @@ test('missing uncertainty, a controlled total, no estimate and zero are all dist
   assert.doesNotMatch(svg, /significan/i);
 });
 
+test('no grid or zero line crosses a place label', () => {
+  const model = intervalChartModel({ unit: 'persons', rows: [
+    { key: 'a', label: 'Census Tract 166, Erie County', value: ok(2605, 645) },
+    { key: 'b', label: 'Census Tract 9900, Erie County', value: ok(0, 13) }] });
+  const svg = intervalChartSvg(model, {});
+  const labels = [...svg.matchAll(/class="ic-label" x="[\d.]+" y="([\d.]+)"/g)].map((m) => Number(m[1]));
+  const lines = [...svg.matchAll(/class="ic-grid[^"]*" x1="[^"]+" x2="[^"]+" y1="([\d.]+)" y2="([\d.]+)"/g)]
+    .map((m) => [Number(m[1]), Number(m[2])]);
+  assert.strictEqual(labels.length, 2);
+  // A label's glyphs occupy roughly 11 px above its baseline and 3 below.
+  labels.forEach((y) => lines.forEach(([y1, y2]) => {
+    assert.ok(y2 <= y - 11 || y1 >= y + 3, `line ${y1}-${y2} crosses the label at ${y}`);
+  }));
+});
+
 test('chart text is escaped', () => {
   const model = intervalChartModel({ unit: 'persons', rows: [
     { key: 'a', label: '<script>x</script>', value: ok(1, 1) }] });
