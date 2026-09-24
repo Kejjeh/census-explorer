@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadPlaywright, parseArgs, outDir, createReport, requireLiveTargets } from './lib.mjs';
 
-const args = parseArgs(process.argv.slice(2), { local: '', static: '', out: '', 'preflight-only': false });
+const args = parseArgs(process.argv.slice(2), { local: '', static: '', out: '', only: '', 'preflight-only': false });
 if (!args.local && !args.static) {
   console.error('give --local and/or --static'); process.exit(2);
 }
@@ -363,22 +363,162 @@ async function keyboardOnly(mode, url) {
   await finish(app, `${mode} keyboard`);
 }
 
+/**
+ * From the table to the result actions (Share, Open brief, Export) at 390 CSS
+ * px: how many key presses by plain Tab order, and by the skip route when the
+ * page offers one. Also checks where each skip link lands, that it is visible
+ * when focused, the route back, that the URL is left alone, and that disabled
+ * actions stay disabled and unfocusable while loading and after a failure.
+ */
+async function resultActionsRoute(mode, url) {
+  report.section(`${mode}: from the table to the result actions at 390 CSS px`);
+  const app = await openApp(mode, url, NARROW);
+  app.expectFailure = true;
+  const { page } = app;
+  await page.click('#region-switch button[data-region="nys"]'); await idle(page, 'nys');
+  await page.click('.level-switch button[data-level="tract"]'); await idle(page, 'nys');
+  await page.selectOption('#county-select', '36029'); await idle(page, 'county:36029');
+  const actions = mode === 'static'
+    ? [['btn-share', 'Share view'], ['btn-brief', 'Open brief'], ['btn-export', 'Download CSV']]
+    : [['btn-brief', 'Open brief'], ['btn-export', 'Export']];
+  const toRow = async () => page.focus('#table-body tr[tabindex="0"]');
+  const hashBefore = await page.evaluate(() => location.hash);
+
+  // Plain Tab order, both directions. Forward only arrives by wrapping from
+  // the end of the document to its start, which in a desktop browser also
+  // passes through the browser's own toolbar; headless Chromium skips that.
+  const measureNatural = async (label) => {
+    const natural = {};
+    for (const [id, name] of actions) {
+      const counts = [];
+      for (const back of [false, true]) {
+        await toRow();
+        counts.push(await tabTo(page, `el.id === '${id}'`, name, { back, max: 200 }));
+      }
+      natural[name] = { forward_wrapping: counts[0], backward: counts[1] };
+    }
+    report.note(`plain Tab order from the table, ${label} (key presses)`, natural);
+  };
+  await measureNatural('nothing inspected');
+  // The usual state after comparing: one place inspected, two compared.
+  const firstRows = await page.$$eval('#table-body tr[data-geoid]', (rs) => rs.slice(0, 2).map((r) => r.dataset.geoid));
+  for (const g of firstRows) {
+    await page.click(`#table-body tr[data-geoid="${g}"]`);
+    await page.click('#place-card button:has-text("Add to comparison")');
+  }
+  await measureNatural('one place inspected, two compared');
+
+  const hasRoute = await page.$('#table-skip-actions');
+  if (!hasRoute) {
+    report.check(false, 'a skip route from the table to the result actions exists');
+    await finish(app, `${mode} result actions`);
+    return;
+  }
+
+  // The skip route.
+  const route = {};
+  for (const [id, name] of actions) {
+    await toRow();
+    let presses = 0;
+    await page.keyboard.press('Tab'); presses += 1;
+    const link = await page.evaluate(() => {
+      const el = document.activeElement; const r = el.getBoundingClientRect();
+      return { id: el.id, text: el.textContent.trim(), visible: r.top >= 0 && r.bottom <= innerHeight && r.width > 0 };
+    });
+    if (id === actions[0][0]) {
+      report.check(link.id === 'table-skip-actions' && link.visible,
+        'one Tab from the table reaches a visible "Skip to result actions" link', link);
+      report.check(await focusVisible(page) === true, 'the skip link shows a focus indicator');
+    }
+    await page.keyboard.press('Enter'); presses += 1;
+    const landed = await page.evaluate(() => document.activeElement.id);
+    if (id === actions[0][0]) report.check(landed === 'result-actions', 'Enter lands on the result actions group', landed);
+    const n = await tabTo(page, `el.id === '${id}'`, name, { max: 10 });
+    presses += n;
+    route[name] = presses;
+    report.check(presses <= 5 && await focusVisible(page) === true, `${name}: ${presses} key presses from the table by the skip route (target at most 5), focus visible`);
+  }
+  report.check(await page.evaluate(() => location.hash) === hashBefore, 'the skip links leave the page address alone', await page.evaluate(() => location.hash));
+
+  // Back again, and the ordinary reverse direction.
+  const row = await page.evaluate(() => document.querySelector('#table-body tr[tabindex="0"]').dataset.geoid);
+  await page.focus('#result-actions');
+  await page.keyboard.press('Shift+Tab');
+  const before = await page.evaluate(() => document.activeElement.id);
+  report.check(before === 'btn-method', 'Shift+Tab from the actions group goes to the control before it, not into a trap', before);
+  await page.focus('#btn-export');
+  await page.keyboard.press('Tab');
+  const back = await page.evaluate(() => ({ id: document.activeElement.id, text: document.activeElement.textContent.trim() }));
+  report.check(back.id === 'actions-skip-table', 'one Tab after the last action reaches "Back to the table"', back);
+  await page.keyboard.press('Enter');
+  const home = await page.evaluate(() => document.activeElement.dataset && document.activeElement.dataset.geoid);
+  report.check(home === row, 'Enter returns focus to the table row that was left', { expected: row, got: home });
+
+  // While loading: the actions are disabled and the route skips them.
+  let release;
+  const held = new Promise((r) => { release = r; });
+  await page.route(/naturalized_share_of_foreign_born/, async (route_) => { await held; return route_.continue(); });
+  // Started, not awaited: the load is held (or failed) on purpose.
+  await page.evaluate(() => { chooseMeasure('naturalized_share_of_foreign_born'); });
+  await page.waitForFunction(() => state.loading);
+  await page.focus('#table-skip-actions'); await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  const loading = await page.evaluate((ids) => ({
+    focus: document.activeElement.id,
+    disabled: ids.map((i) => document.getElementById(i).disabled),
+  }), actions.map(([i]) => i));
+  report.check(loading.disabled.every(Boolean) && !actions.some(([i]) => i === loading.focus),
+    'while a view loads, every result action is disabled and Tab from the group skips them', loading);
+  release(); await idle(page, 'county:36029');
+  await page.unroute(/naturalized_share_of_foreign_born/);
+
+  // After a failed load: still disabled, and the way back still lands somewhere real.
+  await page.route(/foreign_born_share/, (r) => (/values/.test(r.request().url()) ? r.abort() : r.continue()));
+  // Started, not awaited: the load is held (or failed) on purpose.
+  await page.evaluate(() => { chooseMeasure('foreign_born_share'); });
+  await page.waitForSelector('#blocked:not([hidden])', { timeout: 20000 });
+  await page.focus('#result-actions'); await page.keyboard.press('Tab');
+  const failed = await page.evaluate((ids) => ({
+    focus: document.activeElement.id, disabled: ids.map((i) => document.getElementById(i).disabled),
+    saveSubmit: document.getElementById('save-submit') ? document.getElementById('save-submit').disabled : null,
+  }), actions.map(([i]) => i));
+  // Locally, "Saved views" stays usable so saved views can still be reopened;
+  // its Save button is what waits for a complete view.
+  const next = mode === 'static' ? 'actions-skip-table' : 'btn-save';
+  report.check(failed.disabled.every(Boolean) && failed.focus === next && (mode === 'static' || failed.saveSubmit === true),
+    `after a failed load share/brief/export stay disabled; Tab from the group reaches ${mode === 'static' ? '"Back to the table"' : '"Saved views", whose Save stays disabled'}`, failed);
+  await page.focus('#actions-skip-table');
+  await page.keyboard.press('Enter');
+  const fallback = await page.evaluate(() => document.activeElement.id);
+  report.check(fallback === 'table-title', 'with no rows, "Back to the table" lands on the table heading', fallback);
+  await page.unroute(/foreign_born_share/);
+  report.note('skip route (key presses from the table)', route);
+  await finish(app, `${mode} result actions`);
+}
+
 /* ------------------------------------------------------------ run */
 
 const targets = [['local', args.local], ['static', args.static]].filter(([, u]) => u);
+// --only <name> runs one journey, for diagnosis; a release run runs them all.
+const JOURNEYS = {
+  'county-to-tract': countyToTract, comparison: outsideComparison,
+  share: (mode, url) => (mode === 'static' ? shareAndReload(url) : null),
+  failure: loadFailure, layout: narrowLayout, keyboard: keyboardOnly, 'result-actions': resultActionsRoute,
+};
+if (args.only && !JOURNEYS[args.only]) {
+  console.error(`--only must be one of: ${Object.keys(JOURNEYS).join(', ')}`); process.exit(2);
+}
 for (const [mode, url] of targets) {
-  await countyToTract(mode, url);
-  await outsideComparison(mode, url);
-  if (mode === 'static') await shareAndReload(url);
-  await loadFailure(mode, url);
-  await narrowLayout(mode, url);
-  await keyboardOnly(mode, url);
+  for (const [name, run] of Object.entries(JOURNEYS)) {
+    if (!args.only || args.only === name) await run(mode, url);
+  }
 }
 await browser.close();
 const body = report.write({
   run_at: new Date().toISOString(),
   targets: Object.fromEntries(targets),
   browser: 'Chromium via Playwright (headless shell)',
+  only: args.only || 'all journeys',
   desktop_viewport: `${DESKTOP.width}×${DESKTOP.height}`,
   narrow_viewport: `${NARROW.width}×${NARROW.height}`,
 });

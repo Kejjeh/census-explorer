@@ -81,6 +81,22 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
   border-radius: var(--radius); font-weight: 600; text-decoration: none;
 }
 .skip-link:focus { top: var(--s3); }
+/* Skip links inside the page: out of sight until focused, then shown in place
+ * as an ordinary link, so a keyboard user sees where the next stop is. */
+.skip-inline {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.skip-inline:focus {
+  position: static; width: auto; height: auto; overflow: visible; clip: auto; clip-path: none;
+  display: inline-block; margin: var(--s2) 0; padding: var(--s2) var(--s3);
+  background: var(--surface); color: var(--accent-2); font-weight: 600;
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  outline: 2px solid var(--focus); outline-offset: 2px; white-space: normal;
+}
+.result-actions { display: flex; gap: var(--s2); flex-wrap: wrap; border-radius: var(--radius); }
+.result-actions:focus { outline: 2px solid var(--focus); outline-offset: 3px; }
+#table-title:focus { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .muted { color: var(--muted); }
 .tiny { font-size: 12px; }
@@ -624,6 +640,7 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
   .release-chip { order: 2; width: 100%; }
   .topbar-actions { order: 3; width: 100%; margin-left: 0; }
   .topbar-actions .btn { flex: 1; }
+  .topbar-actions .result-actions { flex: 3 1 auto; }
   .place-find { flex: 1 1 100%; min-width: 0; }
   .save-panel { right: var(--s2); left: var(--s2); width: auto; top: 120px; }
   /* Stacked, the table scrolls with the page. A box a few rows tall inside

@@ -434,7 +434,36 @@ function applyStaticMode() {
     '</ul></details>';
 }
 
+/**
+ * Skip links move focus; they do not navigate. Following the href would
+ * replace the address's #view= with #stage or #result-actions, and a shared
+ * view reloaded from that address would be lost. "The table" means its
+ * current row stop (one per table), or its heading when it has no rows.
+ * Disabled actions stay disabled: the group takes focus, and Tab from it
+ * moves only to the actions that are enabled.
+ */
+function wireSkipLinks() {
+  document.querySelectorAll('a[data-skip]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      const where = a.dataset.skip;
+      let target = null;
+      if (where === 'table') {
+        target = $('table-body').querySelector('tr[tabindex="0"]') || $('table-title');
+      } else if (where === 'actions') {
+        target = $('result-actions');
+      } else {
+        target = $(where);
+      }
+      if (!target) return;
+      e.preventDefault();
+      target.focus();
+      target.scrollIntoView({ block: 'nearest' });
+    });
+  });
+}
+
 function wireControls() {
+  wireSkipLinks();
   document.querySelectorAll('.level-switch button').forEach((b) => {
     b.addEventListener('click', () => setLevel(b.dataset.level));
   });

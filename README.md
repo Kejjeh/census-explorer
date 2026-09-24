@@ -40,7 +40,7 @@ no telemetry, and the local service holds no credentials.
 | Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 471 Python tests (Linux) plus 42 Node tests of the page logic, no network; cached files read identically with LF or CRLF line endings |
+| Offline test suite | Working: 478 Python tests (Linux) plus 42 Node tests of the page logic, no network; cached files read identically with LF or CRLF line endings |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, with shareable views and printable briefs; saved projects and export bundles still require the local app. See `docs/DEPLOY.md` |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
@@ -187,7 +187,7 @@ start-up.
 ## Verify the build
 
 ```powershell
-python -m unittest discover -s tests -t .          # 471 offline tests on Linux
+python -m unittest discover -s tests -t .          # 478 offline tests on Linux
 python -m census_explorer.cli verify manifests     # re-hash the raw cache
 python -m census_explorer.cli verify catalog       # cells vs the published release
 python -m census_explorer.cli reconcile --release acs5_2023

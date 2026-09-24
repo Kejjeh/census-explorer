@@ -7,7 +7,9 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip-link" href="#stage">Skip to the map</a>
+<a class="skip-link" href="#stage" data-skip="stage">Skip to the map</a>
+<a class="skip-link" href="#data-table" data-skip="table">Skip to the table</a>
+<a class="skip-link" href="#result-actions" data-skip="actions">Skip to result actions: share, brief and export</a>
 <div id="mode-banner" class="mode-banner" hidden></div>
 <div id="static-note" class="static-note" hidden></div>
 <div id="link-note" class="link-note" role="status" hidden></div>
@@ -24,12 +26,16 @@
   <div class="topbar-actions">
     <button type="button" class="btn" id="btn-method" aria-expanded="false"
             aria-controls="drawer">Method &amp; sources</button>
-    <button type="button" class="btn" id="btn-save" aria-expanded="false"
-            aria-controls="save-panel">Saved views</button>
-    <button type="button" class="btn" id="btn-share" aria-controls="share-result" aria-expanded="false" hidden>Share view</button>
-    <button type="button" class="btn" id="btn-brief">Open brief</button>
-    <button type="button" class="btn primary" id="btn-export">Export</button>
+    <div id="result-actions" class="result-actions" role="group" tabindex="-1"
+         aria-label="Result actions: share, brief and export">
+      <button type="button" class="btn" id="btn-save" aria-expanded="false"
+              aria-controls="save-panel">Saved views</button>
+      <button type="button" class="btn" id="btn-share" aria-controls="share-result" aria-expanded="false" hidden>Share view</button>
+      <button type="button" class="btn" id="btn-brief">Open brief</button>
+      <button type="button" class="btn primary" id="btn-export">Export</button>
+    </div>
   </div>
+  <a class="skip-inline" id="actions-skip-table" href="#data-table" data-skip="table">Back to the table</a>
 </header>
 
 <div id="share-result" class="share-panel" role="region" aria-label="Share this view" hidden><label class="field">Copy this link<input id="share-url" type="text" readonly></label><button class="btn" id="share-copy" type="button">Copy link</button> <button class="btn" id="share-close" type="button">Close sharing</button><p>Reopens the measure, geography, selected scope, inspected place, comparison and reference. It checks the published snapshot; it is not a saved project. Map zoom and table sort are not included.</p></div>
@@ -153,7 +159,7 @@
 
     <div class="table-block">
       <div class="table-head-row">
-        <h2 id="table-title">Areas</h2>
+        <h2 id="table-title" tabindex="-1">Areas</h2>
         <p class="muted tiny" id="table-note"></p>
       </div>
       <div class="table-scroll">
@@ -166,6 +172,8 @@
           <tbody id="table-body"></tbody>
         </table>
       </div>
+      <a class="skip-inline" id="table-skip-actions" href="#result-actions"
+         data-skip="actions">Skip to result actions: share, brief and export</a>
       <p id="table-empty" class="empty-state" hidden></p>
       <nav id="table-pager" class="table-pager" aria-label="Table pages"></nav>
     </div>
