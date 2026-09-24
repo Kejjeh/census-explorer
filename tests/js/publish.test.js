@@ -50,6 +50,30 @@ test('a scoped link cannot list places outside its scope or ask for an impossibl
   assert.throws(() => decodeSharedView(hashOf({...v2, scope:'nys', benchmark:'none'}), narrow), /cannot be shown/);
   assert.throws(() => decodeSharedView(hashOf({...v2, scope:'nyc', benchmark:'nys', areas:[], compare:[], pick:null}), narrow), /not supported/);
 });
+const {selectionForLevel} = require('../../web/core.js');
+test('county to tract: a county inspected or compared does not follow into the tract view', () => {
+  // The reviewed failure: New York State counties, Erie County inspected and
+  // compared, then "Explore this county's census tracts".
+  const before = {pick:'36029', compare:['36029', '36005']};
+  const stale = {v:2, snapshot:'snap', release:'acs', level:'tract', scope:'county:36029', measure:'share',
+    areas:[], benchmark:'none', pick:before.pick, compare:before.compare};
+  // Exactly the reported message when only the inspected place is stale...
+  assert.throws(() => encodeSharedView({...stale, compare:[]}, scoped), /unknown inspected place/);
+  // ...and a stale comparison is refused too.
+  assert.throws(() => encodeSharedView({...stale, pick:null}, scoped), /incompatible places/);
+  const kept = selectionForLevel(before, 'tract', scoped.areas);
+  assert.deepEqual(kept, {pick:null, compare:[]});
+  const view = {...stale, ...kept};
+  assert.deepEqual(decodeSharedView(encodeSharedView(view, scoped), scoped), view);
+});
+test('a same-level place outside the scope stays inspected and comparable across a scope change', () => {
+  const before = {pick:'36005000100', compare:['36005000100', '36029016600']};
+  assert.deepEqual(selectionForLevel(before, 'tract', scoped.areas), before);
+  const view = {...v2, benchmark:'none', ...before};
+  assert.deepEqual(decodeSharedView(encodeSharedView(view, scoped), scoped), view);
+  // Going back up to counties keeps nothing from the tract level.
+  assert.deepEqual(selectionForLevel(before, 'county', scoped.areas), {pick:null, compare:[]});
+});
 const input = {dataset:{data_mode:'live', release:{period_label:'2019–2023 ACS', citation:'Census Bureau'}, areas:[{geoid:'001',name:'Bronx <script>alert(1)</script>'}]}, measure:{label:'Naturalized share',unit:'percent',out_of:'foreign-born people', tables:['B05002'], numerator_cells:['N'],denominator_cells:['D']}, areas:['001'],values:{'001':{e:53.7,es:'ok',m:0.8,ms:'ok',n:537,d:1000}}, quality:{comparison:{lines:['Within one period.']}}, benchmark:null,snapshot:'snapshot-a'};
 test('brief keeps denominator, percentage-point MOE, scope and escaped source content', () => {
   const html=publishedBrief(input);

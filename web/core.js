@@ -234,6 +234,22 @@ function describeScope(scope, level, count, countyName, partial) {
   return `${n} census tracts in ${countyName || scope.county}`;
 }
 
+/**
+ * The inspected place and the comparison that survive a change of geography
+ * level. A GEOID names a place at one level only, so a county kept as the
+ * inspected place in a tract view would be offered for a tract comparison
+ * and written into a share link that the link's own checks then refuse.
+ * Anything not at the new level is dropped. A place that is at the new level
+ * but outside the scope is kept: inspecting it is allowed, and the page
+ * labels it as outside the view.
+ */
+function selectionForLevel(selection, level, areas) {
+  const at = new Set(areas.filter((a) => a.level === level).map((a) => a.geoid));
+  const pick = selection && selection.pick && at.has(selection.pick) ? selection.pick : null;
+  const compare = ((selection && selection.compare) || []).filter((g) => at.has(g));
+  return { pick, compare };
+}
+
 /* ------------------------------------------------------------ pagination */
 
 /**
@@ -423,7 +439,7 @@ function intervalChartSvg(model, opts) {
 if (typeof module === 'object' && module.exports) {
   module.exports = {
     createLoadGate, classBreaks, classIndex, legendRanges, coverageSentences,
-    SCOPE_DEFAULT, parseScope, resolveScope, describeScope,
+    SCOPE_DEFAULT, parseScope, resolveScope, describeScope, selectionForLevel,
     pageWindow, pageOfIndex, niceStep, intervalChartModel, intervalChartSvg,
   };
 }

@@ -555,11 +555,13 @@ function renderScopeControl() {
  * those places may not be in the new scope; the inspected place and the
  * comparison stay, and are labelled if they fall outside it.
  */
-async function setScope(code) {
+async function setScope(code, areas = []) {
   const s = parseScope(code);
-  if (s.code === state.scope && !state.areas.length) return;
+  if (s.code === state.scope && !state.areas.length && !areas.length) return;
   state.scope = s.code;
-  state.areas = [];
+  // Places to narrow to are only ever passed in together with a scope that
+  // holds them; see scopeHolding.
+  state.areas = [...areas];
   state.page = 0;
   state.placeQuery = '';
   $('place-search').value = '';
@@ -571,38 +573,89 @@ async function setScope(code) {
   await refresh();
 }
 
-/** Open one county's census tracts, from anywhere. */
-async function exploreCounty(county) {
-  state.level = 'tract';
-  if (!measures().some((m) => m.measure_id === state.measureId)) {
-    state.measureId = measures()[0]?.measure_id || null;
-  }
-  renderSidebar();
-  await setScope(`county:${county}`);
+/**
+ * The narrowest scope, at this level, that holds every one of `geoids`: the
+ * current one if it already does, else their shared county (tract level),
+ * else New York City, else the state. Null when this build has none.
+ */
+function scopeHolding(geoids) {
+  const holds = (code) => {
+    try {
+      const inScope = new Set(scopeGeoids(code));
+      return geoids.every((g) => inScope.has(g));
+    } catch (_) { return false; }
+  };
+  const candidates = [state.scope];
+  const counties = [...new Set(geoids.map((g) => g.slice(0, 5)))];
+  if (state.level === 'tract' && counties.length === 1) candidates.push(`county:${counties[0]}`);
+  candidates.push('nyc');
+  if (state.catalog.statewide) candidates.push('nys');
+  return candidates.find(holds) || null;
 }
 
-async function setLevel(level) {
-  if (level === state.level || !state.catalog.levels[level]) return;
+/** A scope in the words a button can use: "Suffolk County's census tracts". */
+function scopeName(code) {
+  const s = parseScope(code);
+  if (s.kind === 'county') return `${areaName(s.county)}'s census tracts`;
+  const region = (state.catalog.regions || []).find((r) => r.scope === s.kind);
+  return region ? region.label : code;
+}
+
+/**
+ * Move to another geography level, and everything that has to change with
+ * it, in one synchronous step before anything is loaded. The level switch
+ * and "Explore this county's census tracts" both come through here, so
+ * neither can leave a county inspected or compared in a tract view.
+ *
+ * Nothing awaits between the state change and the loads that follow, and the
+ * view is marked not ready at once: Share, the brief and the CSV cannot run
+ * against the new level with the previous level's rows.
+ */
+function enterLevel(level, scope) {
+  const kept = selectionForLevel({ pick: state.pick, compare: state.compare },
+    level, state.dataset.areas);
   state.level = level;
-  // One county's tracts has no county-level equivalent other than the
-  // region it sits in; it never silently becomes the state.
-  if (level === 'county' && parseScope(state.scope).kind === 'county') {
-    state.scope = regionOf(state.scope);
-  }
-  state.page = 0;
-  // A place chosen at one level does not exist at another, and neither does a
-  // comparison built from it.
+  state.scope = scope;
+  state.pick = kept.pick;
+  state.compare = kept.compare;
+  // Places narrowed to at one level do not exist at another.
   state.areas = [];
-  state.pick = null;
-  state.compare = [];
+  state.page = 0;
+  state.hover = null;
   state.placeQuery = '';
   $('place-search').value = '';
   closePlaceResults();
+  dismissShare();
+  state.ready = false;
+  updateActions();
   if (!measures().some((m) => m.measure_id === state.measureId)) {
     state.measureId = measures()[0]?.measure_id || null;
   }
   renderLevelSwitch();
   renderSidebar();
+  // What was on screen belonged to the other level; do not leave it looking
+  // current while the new level loads.
+  renderPlaceCard();
+  renderComparePanel();
+}
+
+/** Open one county's census tracts, from anywhere. */
+async function exploreCounty(county) {
+  const code = `county:${county}`;
+  if (state.level === 'tract' && state.scope === code && !state.areas.length) return;
+  enterLevel('tract', code);
+  fitMap();
+  await loadBenchmarks();
+  await refresh();
+}
+
+async function setLevel(level) {
+  if (level === state.level || !state.catalog.levels[level]) return;
+  // One county's tracts has no county-level equivalent other than the
+  // region it sits in; it never silently becomes the state.
+  const scope = level === 'county' && parseScope(state.scope).kind === 'county'
+    ? regionOf(state.scope) : state.scope;
+  enterLevel(level, scope);
   await loadBenchmarks();
   await refresh();
 }
@@ -1131,9 +1184,14 @@ function renderStarters(opts = {}) {
     b.type = 'button';
     b.className = 'starter';
     b.dataset.starter = starter.starter_id;
+    // A starter opens New York City. Saying "all counties" in a build that
+    // covers the state would promise 62 counties and deliver five.
+    const city = (state.catalog.regions || []).find((r) => r.scope === 'nyc');
     const where = starter.areas.length
-      ? starter.area_names.join(' and ')
-      : `all ${starter.level_label.toLowerCase()}`;
+      ? `${starter.area_names.join(' and ')}, in New York City`
+      : (city
+        ? describeScope(parseScope('nyc'), starter.level, city.counts[starter.level], null, false)
+        : `all ${starter.level_label.toLowerCase()}`);
     const compared = starter.compare_names.length
       ? `, comparing ${starter.compare_names.join(' and ')}` : '';
     const outOf = starter.unit === 'percent'
@@ -2097,8 +2155,29 @@ function renderComparePanel() {
     both.className = 'btn';
     const isLimited = state.areas.length === 2 &&
       state.compare.every((g) => state.areas.includes(g));
-    both.textContent = isLimited ? `Show all ${levelNoun(2)}` : 'Show only these two';
-    both.addEventListener('click', () => setAreas(isLimited ? [] : [...state.compare]));
+    // Narrowing the view to places outside it is not narrowing: it would
+    // request places the scope does not hold, and the load would be refused.
+    // The button says which scope it switches to, or why it cannot.
+    const holding = isLimited ? state.scope : scopeHolding(state.compare);
+    let note = null;
+    if (isLimited) {
+      both.textContent = `Show all ${levelNoun(2)}`;
+      both.addEventListener('click', () => setAreas([]));
+    } else if (holding === state.scope) {
+      both.textContent = 'Show only these two';
+      both.addEventListener('click', () => setAreas([...state.compare]));
+    } else if (holding) {
+      both.textContent = `Switch to ${scopeName(holding)} and show only these two`;
+      both.addEventListener('click', () => setScope(holding, [...state.compare]));
+    } else {
+      both.textContent = 'Show only these two';
+      both.disabled = true;
+      note = document.createElement('p');
+      note.className = 'muted tiny';
+      note.textContent = 'Not available: no view in this build holds both places.';
+      both.setAttribute('aria-describedby', 'compare-limit-note');
+      note.id = 'compare-limit-note';
+    }
     const clearBoth = document.createElement('button');
     clearBoth.type = 'button';
     clearBoth.className = 'btn ghost';
@@ -2112,6 +2191,7 @@ function renderComparePanel() {
     });
     limit.append(both, clearBoth);
     host.appendChild(limit);
+    if (note) host.appendChild(note);
   }
 }
 
@@ -2139,7 +2219,7 @@ function compareChart(m) {
     id: 'cmp-chart',
     title: `${m.label}: ${names}, ${state.catalog.period_label}`,
     desc: `Published estimates with their 90% margins of error on one axis ` +
-      `starting at zero. ${axis}. Not a test of statistical significance.`,
+      `that includes zero. ${axis}. Not a test of statistical significance.`,
     format: (v) => fmt(v, m.unit),
     formatMoe: (x) => fmtMoe(x, m.unit),
     axisLabel: axis,
