@@ -15,12 +15,17 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadPlaywright, parseArgs, outDir, createReport } from './lib.mjs';
+import { loadPlaywright, parseArgs, outDir, createReport, requireLiveTargets } from './lib.mjs';
 
-const args = parseArgs(process.argv.slice(2), { local: '', static: '', out: '' });
+const args = parseArgs(process.argv.slice(2), { local: '', static: '', out: '', 'preflight-only': false });
 if (!args.local && !args.static) {
   console.error('give --local and/or --static'); process.exit(2);
 }
+// Every target's own status metadata is checked first, before Playwright is
+// loaded or anything is rendered or reported. A fixture build, or one whose
+// mode is missing or unknown, is refused.
+await requireLiveTargets([['local', args.local], ['static', args.static]].filter(([, u]) => u));
+if (args['preflight-only']) process.exit(0);
 const { chromium } = await loadPlaywright();
 const dir = outDir(args.out, 'journeys');
 const report = createReport(dir, 'Census Explorer browser acceptance (live data)');

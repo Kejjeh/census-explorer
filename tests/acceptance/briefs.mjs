@@ -24,10 +24,16 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadPlaywright, parseArgs, outDir, createReport } from './lib.mjs';
+import { pathToFileURL } from 'node:url';
+import { loadPlaywright, parseArgs, outDir, createReport, requireLiveTargets } from './lib.mjs';
 
-const args = parseArgs(process.argv.slice(2), { local: '', static: '', out: '' });
+const args = parseArgs(process.argv.slice(2), { local: '', static: '', out: '', 'preflight-only': false });
 if (!args.local && !args.static) { console.error('give --local and/or --static'); process.exit(2); }
+// Every target's own status metadata is checked first, before Playwright is
+// loaded or anything is rendered or reported. A fixture build, or one whose
+// mode is missing or unknown, is refused.
+await requireLiveTargets([['local', args.local], ['static', args.static]].filter(([, u]) => u));
+if (args['preflight-only']) process.exit(0);
 const { chromium } = await loadPlaywright();
 const dir = outDir(args.out, 'briefs');
 const report = createReport(dir, 'Census Explorer printed briefs (live data)');
@@ -127,7 +133,11 @@ async function inspect(label, html, c) {
   const shots = [];
   for (let n = 1; n <= pages; n += 1) {
     const v = await viewer.newPage({ viewport: { width: 860, height: 1160 } });
-    await v.goto(`file://${pdfPath}#page=${n}&toolbar=0&navpanes=0&zoom=100`);
+    // pathToFileURL, not a pasted "file://" + path: a Windows path or one with
+    // spaces is not a valid URL written that way.
+    const url = pathToFileURL(pdfPath);
+    url.hash = `page=${n}&toolbar=0&navpanes=0&zoom=100`;
+    await v.goto(url.href);
     await v.waitForTimeout(1500);
     const png = `${base}-page${n}.png`;
     await v.screenshot({ path: png });
@@ -136,7 +146,10 @@ async function inspect(label, html, c) {
   }
   report.check(shots.length === pages && pages > 0, `${label}: every page rendered by the PDF viewer for inspection`, shots);
   const hashes = new Set(shots.map((f) => crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')));
-  report.check(hashes.size === shots.length, `${label}: each page image is a different page`, `${hashes.size} distinct of ${shots.length}`);
+  // Distinct bytes catch the viewer photographing one page repeatedly. They do
+  // not prove each image is the page it is named for, or that the page is
+  // completely drawn: that is what looking at them is for.
+  report.check(hashes.size === shots.length, `${label}: page images are pairwise distinct files (not proof of page identity or complete rendering)`, `${hashes.size} distinct of ${shots.length}`);
   return { pdf: path.basename(pdfPath), pages, shots };
 }
 
@@ -158,7 +171,7 @@ const body = report.write({
   printer: 'Chromium print-to-PDF (headless shell)',
   viewer: 'Chromium PDF viewer (full Chromium, headless)',
   results,
-  visual_inspection: 'required: open the page PNGs; this script does not judge them',
+  visual_inspection: 'REQUIRED and manual: open every page PNG. Distinct image hashes are not evidence of page identity or complete rendering; this script does not judge the pages.',
 });
 console.log(`\n${body.failures} failing check(s). Report: ${path.join(dir, 'report.md')}`);
 process.exit(body.failures ? 1 : 0);

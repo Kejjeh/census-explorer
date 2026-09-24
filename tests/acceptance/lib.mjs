@@ -27,11 +27,74 @@ export async function loadPlaywright() {
   process.exit(2);
 }
 
+/**
+ * Where each kind of target publishes its build's status: the local service
+ * answers /api/status; a static site ships the same record as a file.
+ */
+export const STATUS_PATH = { local: 'api/status', static: 'data/status.json' };
+
+/**
+ * Whether a status record says the build is live. Anything else fails
+ * closed: fixture, a missing or unknown mode, or no record at all.
+ */
+export function liveModeVerdict(status) {
+  if (!status || typeof status !== 'object' || Array.isArray(status)) {
+    return { ok: false, reason: 'the status response is not a JSON object' };
+  }
+  if (!('data_mode' in status)) return { ok: false, reason: 'the status response has no data_mode' };
+  if (status.data_mode !== 'live') {
+    return { ok: false, reason: `data_mode is ${JSON.stringify(status.data_mode)}, not "live"` };
+  }
+  return { ok: true, reason: 'data_mode is "live"' };
+}
+
+/**
+ * Read a target's own status metadata before anything is rendered or
+ * reported, and refuse it unless it is a live build. Returns the verdict;
+ * never throws, so the caller decides how to stop.
+ */
+export async function checkLiveTarget(kind, base) {
+  const where = new URL(STATUS_PATH[kind], base).href;
+  let res;
+  try {
+    res = await fetch(where, { headers: { Accept: 'application/json' } });
+  } catch (e) {
+    return { ok: false, where, reason: `could not reach it (${e.message})` };
+  }
+  if (!res.ok) return { ok: false, where, reason: `HTTP ${res.status}` };
+  let status;
+  try { status = JSON.parse(await res.text()); } catch (_) {
+    return { ok: false, where, reason: 'the response is not JSON' };
+  }
+  return { where, ...liveModeVerdict(status) };
+}
+
+/**
+ * Check every target; print one line per target; exit 2 on any refusal.
+ * Runs before Playwright is loaded, before the output directory exists and
+ * before any report is written, so a refused target leaves nothing behind
+ * that could be mistaken for live evidence.
+ */
+export async function requireLiveTargets(targets) {
+  let refused = 0;
+  for (const [kind, base] of targets) {
+    const v = await checkLiveTarget(kind, base);
+    console.log(`${v.ok ? 'live' : 'REFUSED'}  ${kind} ${base}  (${v.where}: ${v.reason})`);
+    if (!v.ok) refused += 1;
+  }
+  if (refused) {
+    console.error('This acceptance run needs live builds. Fixture behaviour is tested ' +
+      'offline in tests/; nothing was rendered or reported.');
+    process.exit(2);
+  }
+}
+
 export function parseArgs(argv, defaults) {
   const out = { ...defaults };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i].replace(/^--/, '');
     if (!(key in defaults)) throw new Error(`unknown option --${key}`);
+    if (typeof defaults[key] === 'boolean') { out[key] = true; continue; }
     out[key] = argv[i + 1];
     i += 1;
   }

@@ -5,9 +5,20 @@ The offline suite (`python -B -m unittest discover -s tests -t .` and
 opens a browser. This recipe is the other half: it drives a real browser
 against the **live** 2019-2023 ACS build, through the local service and the
 published static site, and records what it saw. The two are kept separate on
-purpose. The scripts refuse a fixture build, because their journeys name real
-geographies (Erie County 36029, Suffolk County 36103, Bronx tract
-36005000100).
+purpose.
+
+**Only live builds are accepted.** Before Playwright is loaded, before an
+output directory is created and before anything is rendered or reported,
+each script reads every target's own status metadata: `api/status` for the
+local service, `data/status.json` for the static site. It refuses the run,
+with exit status 2 and nothing written, unless every target says
+`data_mode: "live"`. A fixture build is refused, as is a missing or unknown
+mode, an HTTP error, a response that is not a JSON object, or a target that
+cannot be reached. `--preflight-only` runs just this check. The offline
+suite drives it against controlled responses (`tests/test_acceptance_harness.py`);
+no browser is involved. The journeys name real geographies (Erie County
+36029, Suffolk County 36103, Bronx tract 36005000100), so they would be
+meaningless on synthetic data anyway.
 
 Nothing here is a dependency of this repository. The scripts load Playwright
 from where it is already installed: `$PLAYWRIGHT_MODULE` if set, else
@@ -72,12 +83,17 @@ The script checks that:
 
 - nothing is wider than the printed page, and no table cell clips its text;
 - the denominator, uncertainty, source and period are printed;
-- every page was rendered, and each page image is a different page. The
-  viewer ignores a `#page=` change within an open document, which once
-  produced three pictures of page 1.
+- every page of the PDF produced an image, and the images are pairwise
+  distinct files. The viewer ignores a `#page=` change within an open
+  document, which once produced three pictures of page 1, and this catches
+  that. **Distinct bytes do not prove that an image shows the page it is
+  named for, or that the page was completely drawn.** Page files are opened
+  through `pathToFileURL`, so paths with spaces (checked) and Windows paths
+  (not checked here) form valid URLs.
 
-**These checks are not visual acceptance.** Open the page PNGs and look at
-them: headings, page breaks, repeated table headers, rows split across pages,
+**These checks are not visual acceptance, and manual inspection is
+mandatory.** Open every page PNG and look at it: confirm that it shows the
+page its name says, then check headings, page breaks, repeated table headers, rows split across pages,
 figures, and anything drawn over anything else.
 
 ## What this recipe does not establish

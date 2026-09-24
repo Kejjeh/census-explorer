@@ -21,7 +21,9 @@ one, and what is still open. Written to be checked, not to reassure.
    prefix, no `/api/` request, no console error.
 5a. Run the browser acceptance recipe in `docs/ACCEPTANCE.md` against the
    local service and the static site: `tests/acceptance/journeys.mjs` must
-   report 0 failing checks. Then run `tests/acceptance/briefs.mjs` and **look
+   report 0 failing checks. Both scripts refuse any target whose own status
+   metadata is not `data_mode: "live"`, before rendering or reporting
+   anything. Then run `tests/acceptance/briefs.mjs` and **look
    at every page PNG it writes**; its checks are not visual acceptance.
 6. Read `site/data/manifest.json`: release, citation, tables, build manifest
    id, counts, join reports, and what this copy cannot do.
@@ -31,7 +33,7 @@ one, and what is still open. Written to be checked, not to reassure.
 
 | | State |
 | --- | --- |
-| Offline test suite | 466 Python tests, 3 skips on Linux (live network), also passing with every text-mode write forced to CRLF as an imitation of Windows; more skips on Windows. Node: 42 page-logic tests. Results on Windows itself are recorded by the independent reviewer, not here |
+| Offline test suite | 471 Python tests, 3 skips on Linux (live network); the CRLF imitation of Windows was last run at 466 tests (8083c02); more skips on Windows. Node: 42 page-logic tests. Results on Windows itself are recorded by the independent reviewer, not here |
 | Data | Official ACS 2019-2023 five-year aggregates for every county and census tract in New York State, built from a recorded manifest; New York City is its documented five-borough subset and the default view |
 | Retrieval sources | Table-based Summary File tables B01003, B05002, B05006, B06004B, B06009 (`acsdt5y2023-*.dat`), the release's geography file `Geos20235YR.txt`, and GENZ2023 cartographic boundaries `cb_2023_36_tract_500k.zip` and `cb_2023_us_county_500k.zip`. Keyless; every artifact has a manifest record with the digest of the complete upstream file |
 | Coverage | Release roster: 1 state, 62 counties, 5,411 tracts. Table rows: 1, 62, 5,396. Boundaries: 62 counties, 5,395 tracts. 15 listed tracts have no table row (14 in Suffolk, 1 in Ulster) and are shown as unavailable; 16 water tracts (population 0) have rows but no polygon and are listed by GEOID. 0 boundary features without observations. Each tract's county agrees with the boundary file's STATEFP and COUNTYFP (5,395 of 5,395) |
@@ -69,6 +71,17 @@ belong to the reviewer and are not claimed here.
 
 ## Open items
 
+- **Page images are checked by eye, not by the script.** `briefs.mjs` checks
+  that the page images are pairwise distinct files. That proves only that the
+  bytes differ, not that each image is the page it is named for or that the
+  page was completely drawn. Opening each page image stays a mandatory,
+  manual step.
+- **The acceptance gate was once open.** Up to `8083c02`, `briefs.mjs
+  --local` did not check the local target's data mode. Against a fixture
+  service it exited 0, writing a report titled "live data" (reproduced
+  with a loopback stub). Both scripts now read each target's status metadata
+  first and fail closed. The evidence recorded above was produced against
+  services that report `data_mode: "live"`.
 - **Print evidence is Chromium only.** The pages above were printed by
   Chromium and drawn by Chromium's own PDF viewer. Firefox, Safari and
   physical printers may paginate differently, and US Letter paper was not
