@@ -249,19 +249,60 @@ def fetch_roster(repo_root: Path, release: Release, state_fips: str,
     return path
 
 
+class RosterError(ValueError):
+    """A cached geography roster that cannot be read as the release published it."""
+
+
+#: The columns the roster reader relies on.
+ROSTER_REQUIRED_COLUMNS = (b"SUMLEVEL", b"GEO_ID", b"NAME")
+
+
 def read_roster(path: Path) -> dict[str, dict[str, str]]:
-    """``{GEO_ID: {"level": ..., "name": ...}}`` from a cached roster."""
+    """``{GEO_ID: {"level": ..., "name": ...}}`` from a cached roster.
+
+    The file is read, never rewritten, so its bytes and recorded digest stay
+    exactly as retrieved. Lines may end in LF or CRLF: a cache written or
+    checked out on Windows ends its lines in CRLF, and a trailing carriage
+    return must not become part of the last column's name or value. A
+    leading byte-order mark is ignored for the same reason.
+
+    What the release publishes is not guessed at. A header without the
+    columns this reader needs, a row with the wrong number of fields, and a
+    GEO_ID listed twice each stop the read with the line number, rather than
+    quietly dropping or overwriting a geography.
+    """
+    raw = path.read_bytes()
+    lines = [line[:-1] if line.endswith(b"\r") else line
+             for line in raw.split(b"\n")]
+    if not lines or not lines[0].strip():
+        raise RosterError(f"{path}: the geography roster is empty")
+    header = lines[0]
+    if header.startswith(b"\xef\xbb\xbf"):
+        header = header[3:]
+    names = header.split(b"|")
+    columns = {name: i for i, name in enumerate(names)}
+    missing = [c.decode() for c in ROSTER_REQUIRED_COLUMNS if c not in columns]
+    if missing:
+        raise RosterError(
+            f"{path}: the geography roster header lacks {', '.join(missing)}; "
+            "the published format changed or the cache is damaged")
+    if len(columns) != len(names):
+        raise RosterError(f"{path}: the geography roster header repeats a column")
+
     out: dict[str, dict[str, str]] = {}
-    lines = path.read_bytes().split(b"\n")
-    columns = {name: i for i, name in enumerate(lines[0].split(b"|"))}
-    for line in lines[1:]:
+    for lineno, line in enumerate(lines[1:], start=2):
         if not line:
             continue
         fields = line.split(b"|")
+        if len(fields) != len(names):
+            raise RosterError(
+                f"{path}:{lineno}: {len(fields)} fields, the header has {len(names)}")
         level = ROSTER_SUMMARY_LEVELS.get(fields[columns[b"SUMLEVEL"]])
         if level is None:
             continue
         geo_id = fields[columns[b"GEO_ID"]].decode("ascii")
+        if geo_id in out:
+            raise RosterError(f"{path}:{lineno}: GEO_ID {geo_id} is listed twice")
         out[geo_id] = {"level": level,
                        "name": fields[columns[b"NAME"]].decode("utf-8", "replace")}
     return out

@@ -314,7 +314,7 @@ def _check_roster(repo_root: Path, release: Release, config: ProjectConfig,
     assumed. A geography in the tables that the roster does not list is an
     error; one the roster lists that the tables lack is carried and reported.
     """
-    from .retrieve.acs_summary_file import read_roster
+    from .retrieve.acs_summary_file import RosterError, read_roster
 
     path = roster_path(repo_root, release, config)
     if not path.exists():
@@ -322,7 +322,12 @@ def _check_roster(repo_root: Path, release: Release, config: ProjectConfig,
             f"statewide coverage needs the release's geography roster "
             f"({path.relative_to(repo_root).as_posix()}), which is not cached. "
             "Run: python -m census_explorer.cli fetch roster")
-    roster = read_roster(path)
+    try:
+        roster = read_roster(path)
+    except (RosterError, UnicodeDecodeError) as exc:
+        raise DatasetError(
+            f"the release's geography roster could not be read: {exc}. Re-run: "
+            "python -m census_explorer.cli fetch roster") from exc
     report: dict[str, Any] = {
         "source": ("the release's own geography file (Geos"
                    f"{release.vintage}{release.period_years}YR.txt), cached at "
