@@ -1,0 +1,381 @@
+// Live browser acceptance: the statewide explorer, local service and static site.
+//
+//   node tests/acceptance/journeys.mjs \
+//     --local  http://127.0.0.1:8765/ \
+//     --static http://127.0.0.1:8899/census-explorer/ \
+//     [--out artifacts/acceptance/journeys-<stamp>]
+//
+// Either target may be omitted. Runs against a LIVE build only: the journeys
+// name real 2019-2023 ACS geographies (Erie County 36029, Suffolk County
+// 36103, Bronx tract 36005000100), and a fixture build is refused rather than
+// half-tested. Fixture behaviour is covered by the offline suite in tests/.
+//
+// Writes report.md, report.json and screenshots to the output directory and
+// exits non-zero if any check fails. See docs/ACCEPTANCE.md.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadPlaywright, parseArgs, outDir, createReport } from './lib.mjs';
+
+const args = parseArgs(process.argv.slice(2), { local: '', static: '', out: '' });
+if (!args.local && !args.static) {
+  console.error('give --local and/or --static'); process.exit(2);
+}
+const { chromium } = await loadPlaywright();
+const dir = outDir(args.out, 'journeys');
+const report = createReport(dir, 'Census Explorer browser acceptance (live data)');
+const DESKTOP = { width: 1480, height: 1000 };
+const NARROW = { width: 390, height: 844 };
+
+const browser = await chromium.launch();
+
+/* ------------------------------------------------------------ helpers */
+
+async function openApp(mode, url, viewport) {
+  const context = await browser.newContext({ viewport, acceptDownloads: true });
+  const page = await context.newPage();
+  const errors = [];
+  const outside = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
+  page.on('request', (r) => {
+    if (!r.url().startsWith(new URL(url).origin) && !r.url().startsWith('blob:')
+        && !r.url().startsWith('data:')) outside.push(r.url());
+  });
+  await page.goto(url);
+  await page.waitForSelector('#map svg path', { timeout: 60000 });
+  await idle(page);
+  const mode_ = await page.evaluate(() => state.status && state.status.data_mode);
+  if (mode_ !== 'live') {
+    console.error(`${url} serves data_mode=${mode_}. This acceptance run needs the live ` +
+      'build; fixture behaviour is tested offline in tests/.');
+    process.exit(2);
+  }
+  return { context, page, errors, outside, mode, url };
+}
+
+/** Wait until one complete load has landed, optionally for a given scope. */
+async function idle(page, scope) {
+  await page.waitForTimeout(60);
+  await page.waitForFunction((w) => state.ready && !state.loading && state.selectionJson
+    && (!w || (state.scope === w && state.selectionJson.scope === w)), scope || null,
+  { timeout: 60000 });
+  await page.waitForTimeout(120);
+}
+
+const text = async (page, sel) => ((await page.textContent(sel)) || '').replace(/\s+/g, ' ').trim();
+
+async function shot(page, name) {
+  await page.screenshot({ path: path.join(dir, `${name}.png`), fullPage: false });
+}
+
+/**
+ * What a 390-pixel reader can and cannot reach: horizontal overflow, and
+ * any visible control that extends past the viewport or cuts off its own
+ * label. Measured, not assumed.
+ */
+async function layoutAudit(page, label) {
+  const r = await page.evaluate(() => {
+    const vw = document.documentElement.clientWidth;
+    const bad = [];
+    const small = [];
+    document.querySelectorAll('button, a[href], input, select, summary, [tabindex="0"]').forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none') return;
+      const rect = el.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const name = (el.getAttribute('aria-label') || el.textContent || el.id || el.tagName)
+        .replace(/\s+/g, ' ').trim().slice(0, 50);
+      if (rect.right > vw + 0.5 || rect.left < -0.5) bad.push(`${name}: x ${Math.round(rect.left)}–${Math.round(rect.right)} of ${vw}`);
+      else if (el.tagName === 'BUTTON' && el.scrollWidth > el.clientWidth + 1) bad.push(`${name}: label cut (${el.scrollWidth} > ${el.clientWidth})`);
+      if (el.tagName !== 'A' && (rect.height < 24 || rect.width < 24) && !el.closest('#table-body')) small.push(`${name} ${Math.round(rect.width)}×${Math.round(rect.height)}`);
+    });
+    return {
+      innerWidth: window.innerWidth, clientWidth: vw, scrollWidth: document.documentElement.scrollWidth,
+      dpr: window.devicePixelRatio, bad, small,
+    };
+  });
+  report.check(r.innerWidth === 390 && r.clientWidth <= 390, `${label}: measured viewport`,
+    `innerWidth ${r.innerWidth}, clientWidth ${r.clientWidth}, devicePixelRatio ${r.dpr}`);
+  report.check(r.scrollWidth <= r.clientWidth, `${label}: no horizontal page overflow`, `scrollWidth ${r.scrollWidth}`);
+  report.check(r.bad.length === 0, `${label}: no control extends past the viewport or cuts off its label`, r.bad.length ? r.bad : undefined);
+  if (r.small.length) report.note(`${label}: controls under 24 CSS px in one dimension`, r.small.slice(0, 12));
+  return r;
+}
+
+/** Press Tab (or Shift+Tab) until the focused element matches, and say how many. */
+async function tabTo(page, predicateSource, what, { back = false, max = 400 } = {}) {
+  for (let i = 1; i <= max; i += 1) {
+    await page.keyboard.press(back ? 'Shift+Tab' : 'Tab');
+    // eslint-disable-next-line no-new-func
+    const hit = await page.evaluate(new Function(`const el = document.activeElement; return (${predicateSource});`));
+    if (hit) return i;
+  }
+  report.check(false, `keyboard reaches ${what}`, `not reached in ${max} presses`);
+  return null;
+}
+
+async function focusVisible(page) {
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return 'nothing focused';
+    const cs = getComputedStyle(el);
+    const outline = cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0;
+    const ring = cs.boxShadow && cs.boxShadow !== 'none';
+    const rect = el.getBoundingClientRect();
+    const onScreen = rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth;
+    return (outline || ring) && onScreen ? true : `outline ${cs.outlineStyle} ${cs.outlineWidth}; ring ${cs.boxShadow}; on screen ${onScreen}`;
+  });
+}
+
+async function finish(app, label) {
+  const expected = app.errors.filter((e) => !/ERR_FAILED|Failed to load resource/.test(e) || !app.expectFailure);
+  report.check(expected.length === 0, `${label}: no unexpected console or page errors`, expected.length ? expected : undefined);
+  if (app.mode === 'static') {
+    report.check(app.outside.length === 0, `${label}: no request outside the site's origin`, app.outside.length ? app.outside.slice(0, 5) : undefined);
+  }
+  await app.context.close();
+}
+
+/* ------------------------------------------------------------ journeys */
+
+async function countyToTract(mode, url) {
+  report.section(`${mode}: county to tract, then share and compare (desktop ${DESKTOP.width}×${DESKTOP.height})`);
+  const app = await openApp(mode, url, DESKTOP);
+  const { page } = app;
+  const starters = await page.$$eval('.starter .s-meta', (ns) => ns.map((n) => n.textContent).filter((x) => x.startsWith('Opens')));
+  report.check(starters.length > 0 && starters.every((x) => /New York City/.test(x)), 'starter cards name the New York City scope', starters);
+  report.check((await text(page, '#scope-bar')).startsWith('Showing the 5 New York City boroughs'), 'default view is the five boroughs');
+  await page.click('#region-switch button[data-region="nys"]'); await idle(page, 'nys');
+  report.check((await text(page, '#scope-bar')).startsWith('Showing all 62 counties in New York State'), 'New York State shows 62 counties');
+  await page.fill('#place-search', 'Buffalo'); await page.waitForTimeout(150);
+  report.check(/Cities, towns and neighbourhoods are not geographies here/.test(await text(page, '#place-results')), 'a city search explains that cities are not geographies');
+  await page.fill('#place-search', 'Erie'); await page.waitForTimeout(150);
+  await page.click('#place-results button:has-text("Erie County")'); await page.waitForTimeout(150);
+  await page.click('#place-card button:has-text("Add to comparison")'); await page.waitForTimeout(100);
+  await page.click('#place-card button:has-text("Explore this county")');
+  const now = await page.evaluate(() => ({ level: state.level, pick: state.pick, compare: state.compare, ready: state.ready,
+    brief: document.getElementById('btn-brief').disabled, share: document.getElementById('btn-share').disabled }));
+  report.check(now.level === 'tract' && now.pick === null && now.compare.length === 0,
+    'the county inspected and compared is cleared the moment the tract view is chosen', now);
+  report.check(!now.ready && now.brief && (mode !== 'static' || now.share), 'brief and share wait for the tract view to load');
+  await idle(page, 'county:36029');
+  report.check((await text(page, '#scope-bar')).startsWith('Showing 261 census tracts in Erie County'), 'Erie County shows its 261 census tracts');
+  const drawn = await page.$$eval('#map path', (p) => p.length);
+  report.check(drawn === 260, 'map draws 260 of them (one water tract has no boundary)', `${drawn} shapes`);
+  report.check(/Choose an area/.test(await text(page, '#place-card')), 'the inspector is empty, not offering a county for comparison');
+  if (mode === 'static') {
+    await page.click('#btn-share'); await page.waitForTimeout(150);
+    report.check((await page.inputValue('#share-url')).includes('#view='), 'a share link is produced');
+  }
+  await shot(page, `${mode}-desktop-erie-tracts`);
+  await finish(app, `${mode} county to tract`);
+}
+
+async function outsideComparison(mode, url) {
+  report.section(`${mode}: comparison kept across a scope change (desktop)`);
+  const app = await openApp(mode, url, DESKTOP);
+  const { page } = app;
+  await page.click('#region-switch button[data-region="nys"]'); await idle(page, 'nys');
+  await page.click('.level-switch button[data-level="tract"]'); await idle(page, 'nys');
+  await page.selectOption('#county-select', '36029'); await idle(page, 'county:36029');
+  for (const g of ['36029990000', '36029940100']) {
+    await page.fill('#place-search', g); await page.waitForTimeout(150);
+    await page.click('#place-results button'); await page.waitForTimeout(100);
+    await page.click('#place-card button:has-text("Add to comparison")'); await page.waitForTimeout(100);
+  }
+  const first = page.locator('#compare-panel .pc-actions button').first();
+  report.check((await first.textContent()) === 'Show only these two', 'inside Erie: "Show only these two"');
+  const rows = await page.$$eval('.interval-chart .ic-row', (r) => r.map((x) => x.dataset.state));
+  report.check(rows.length === 2 && rows.every((s) => s === 'interval'), 'the chart draws both published intervals', rows);
+  report.check(/includes zero/.test(await page.$eval('.interval-chart desc', (d) => d.textContent)), 'chart description says the axis includes zero');
+  await page.selectOption('#county-select', '36103'); await idle(page, 'county:36103');
+  report.check(/outside the current view/.test(await text(page, '#compare-panel')), 'in Suffolk, both are kept and labelled outside the view');
+  const label = await first.textContent();
+  report.check(label === "Switch to Erie County's census tracts and show only these two", 'the narrowing action names the scope it switches to', label);
+  await first.click(); await idle(page, 'county:36029');
+  const r = await page.evaluate(() => ({ blocked: !document.getElementById('blocked').hidden, areas: state.selectionJson.areas }));
+  report.check(!r.blocked && r.areas.length === 2, 'no refused load; the view holds exactly the two', r);
+  report.check(/Showing 2 of 261 census tracts in Erie County/.test(await text(page, '#scope-bar')), 'the scope line says 2 of Erie County\'s 261');
+  await finish(app, `${mode} comparison`);
+}
+
+async function shareAndReload(url) {
+  report.section('static: share links, reload, older and stale links (desktop)');
+  const app = await openApp('static', url, DESKTOP);
+  const { page } = app;
+  const snapshot = await page.evaluate(() => window.CENSUS_EXPLORER_STATIC.snapshot);
+  const measure = await page.evaluate(() => state.measureId);
+  await page.click('#region-switch button[data-region="nys"]'); await idle(page, 'nys');
+  await page.click('.level-switch button[data-level="tract"]'); await idle(page, 'nys');
+  await page.selectOption('#county-select', '36103'); await idle(page, 'county:36103');
+  await page.selectOption('#benchmark-select', 'containing_county'); await idle(page, 'county:36103');
+  await page.fill('#place-search', '36005000100'); await page.waitForTimeout(150);
+  await page.click('#place-results button'); await page.waitForTimeout(150);
+  await page.click('#btn-share'); await page.waitForTimeout(150);
+  const link = await page.inputValue('#share-url');
+  await page.goto('about:blank'); await page.goto(link); await page.waitForSelector('#map svg path'); await idle(page, 'county:36103');
+  const back = await page.evaluate(() => ({ scope: state.scope, pick: state.pick, ref: state.benchmark && state.benchmark.label, note: document.getElementById('link-note').hidden }));
+  report.check(back.pick === '36005000100' && back.ref === 'Suffolk County' && back.note, 'reloading the link restores scope, reference and an outside inspected place', back);
+  await page.reload(); await page.waitForSelector('#map svg path'); await idle(page, 'county:36103');
+  report.check(await page.evaluate(() => state.scope === 'county:36103'), 'a browser reload keeps the shared view');
+  const v1 = { v: 1, snapshot, release: 'acs5_2023', level: 'tract', measure, areas: [], benchmark: 'none', pick: null, compare: [] };
+  const open = async (view) => { await page.goto('about:blank'); await page.goto(url + '#view=' + encodeURIComponent(JSON.stringify(view))); await page.waitForSelector('#map svg path'); await idle(page); };
+  await open(v1);
+  report.check((await text(page, '#scope-bar')).startsWith('Showing 2,327 census tracts in New York City'), 'a version 1 link opens New York City, not the state');
+  await open({ ...v1, areas: ['36029016600'] });
+  report.check(/out-of-scope places/.test(await text(page, '#link-note')), 'a version 1 link naming an Erie tract is refused with a notice');
+  await open({ ...v1, snapshot: 'an-older-snapshot' });
+  report.check(/different published snapshot/.test(await text(page, '#link-note')), 'a link from another snapshot is refused with the existing notice');
+  await finish(app, 'static share');
+}
+
+async function loadFailure(mode, url) {
+  report.section(`${mode}: a genuine load failure, then recovery (desktop)`);
+  const app = await openApp(mode, url, DESKTOP);
+  app.expectFailure = true;
+  const { page } = app;
+  let failNext = true;
+  await page.route(/foreign_born_share/, async (route) => {
+    if (failNext && /values/.test(route.request().url())) { failNext = false; return route.abort(); }
+    return route.continue();
+  });
+  await page.fill('#measure-search', 'Foreign-born share'); await page.waitForTimeout(150);
+  await page.locator('.measure', { hasText: 'Foreign-born share' }).first().click();
+  await page.waitForSelector('#blocked:not([hidden])', { timeout: 20000 });
+  const r = await page.evaluate(() => ({ ready: state.ready, rows: document.querySelectorAll('#table-body tr').length,
+    brief: document.getElementById('btn-brief').disabled, exp: document.getElementById('btn-export').disabled }));
+  report.check(!r.ready && r.rows === 0 && r.brief && r.exp, 'the failed view is cleared and brief/export are disabled', r);
+  await page.focus('#blocked button');
+  await page.keyboard.press('Enter'); await idle(page);
+  report.check(await page.evaluate(() => document.activeElement.id) === 'scope-bar', 'after Try again, focus lands on the scope line');
+  report.check((await text(page, '#measure-title')) === 'Foreign-born share of residents' && await page.evaluate(() => state.ready), 'Try again recovers the requested measure');
+  await finish(app, `${mode} load failure`);
+}
+
+async function narrowLayout(mode, url) {
+  report.section(`${mode}: 390 CSS px layout`);
+  const app = await openApp(mode, url, NARROW);
+  const { page } = app;
+  await layoutAudit(page, 'first view');
+  await shot(page, `${mode}-390-first`);
+  await page.click('#region-switch button[data-region="nys"]'); await idle(page, 'nys');
+  await layoutAudit(page, 'New York State counties');
+  await page.click('.level-switch button[data-level="tract"]'); await idle(page, 'nys');
+  await page.selectOption('#county-select', '36029'); await idle(page, 'county:36029');
+  for (const g of ['36029016600', '36029990000']) {
+    await page.fill('#place-search', g); await page.waitForTimeout(150);
+    await page.click('#place-results button'); await page.waitForTimeout(100);
+    await page.click('#place-card button:has-text("Add to comparison")'); await page.waitForTimeout(100);
+  }
+  await layoutAudit(page, 'Erie tracts with a two-place comparison');
+  await page.screenshot({ path: path.join(dir, `${mode}-390-erie-full.png`), fullPage: true });
+  await page.$eval('#compare-panel', (el) => el.scrollIntoView());
+  await shot(page, `${mode}-390-compare`);
+  await page.$eval('#table-pager', (el) => el.scrollIntoView({ block: 'center' }));
+  await shot(page, `${mode}-390-pager`);
+  await finish(app, `${mode} 390 layout`);
+}
+
+/**
+ * Keyboard only, at 390 CSS px: area, level, county to tract, measure,
+ * table, comparison, share, brief and export. Only Tab, Shift+Tab, Enter,
+ * Space, arrows and typing are used; the mouse is never touched.
+ */
+async function keyboardOnly(mode, url) {
+  report.section(`${mode}: keyboard only at 390 CSS px`);
+  const app = await openApp(mode, url, NARROW);
+  const { page } = app;
+  const vw = await page.evaluate(() => window.innerWidth);
+  report.check(vw === 390, 'viewport is 390 CSS px', `${vw}`);
+  const step = async (predicate, what, key = 'Enter', opts = {}) => {
+    const n = await tabTo(page, predicate, what, opts);
+    if (n === null) return false;
+    const fv = await focusVisible(page);
+    report.check(fv === true, `${what}: reached in ${n} Tab presses${opts.back ? ' (backwards)' : ''}, focus visible`, fv === true ? undefined : fv);
+    if (key) await page.keyboard.press(key);
+    return true;
+  };
+  await step(`el.dataset && el.dataset.region === 'nys'`, 'New York State');
+  await idle(page, 'nys');
+  await step(`el.id === 'place-search'`, 'place search', null);
+  await page.keyboard.type('Erie County'); await page.waitForTimeout(150);
+  await page.keyboard.press('ArrowDown');
+  report.check(await page.evaluate(() => document.activeElement.closest('#place-results') !== null), 'ArrowDown moves into the search results');
+  await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+  const afterPick = await page.evaluate(() => ({ pick: state.pick, focus: document.activeElement.id || document.activeElement.className || document.activeElement.tagName }));
+  report.check(afterPick.pick === '36029', 'Enter on a result inspects Erie County', afterPick);
+  report.check(afterPick.focus !== 'BODY', 'focus is not dropped to the page after choosing a result', afterPick.focus);
+  await step(`el.textContent && el.textContent.startsWith('Explore this county')`, '"Explore this county\'s census tracts"');
+  await idle(page, 'county:36029');
+  report.check((await text(page, '#scope-bar')).startsWith('Showing 261 census tracts in Erie County'), 'keyboard reached Erie County\'s tracts');
+  report.check(await page.evaluate(() => document.activeElement.id) === 'scope-bar',
+    'after the pressed control is replaced, focus lands on the scope line, not the page');
+  await step(`el.id === 'measure-search'`, 'measure search', null, { back: true });
+  await page.keyboard.type('Foreign-born share'); await page.waitForTimeout(150);
+  await step(`el.classList && el.classList.contains('measure')`, 'first matching measure');
+  await idle(page, 'county:36029');
+  report.check((await text(page, '#measure-title')) === 'Foreign-born share of residents', 'keyboard chose a measure');
+  await step(`el.closest && el.closest('#table-body') && el.tabIndex === 0`, 'the table (one tab stop)');
+  await page.waitForTimeout(150);
+  const firstPick = await page.evaluate(() => state.pick);
+  await step(`el.textContent === 'Add to comparison'`, '"Add to comparison" for the first row');
+  await step(`el.closest && el.closest('#table-body') && el.tabIndex === 0`, 'back to the table', null, { back: true });
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+  await step(`el.textContent === 'Add to comparison'`, '"Add to comparison" for the second row');
+  const compare = await page.evaluate(() => state.compare);
+  report.check(compare.length === 2 && compare[0] === firstPick, 'two places compared by keyboard', compare);
+  report.check(await page.$$eval('.interval-chart .ic-row', (r) => r.length) === 2, 'the comparison chart is drawn');
+  if (mode === 'static') {
+    await step(`el.id === 'btn-share'`, 'Share view', 'Enter', { back: true });
+    await page.waitForTimeout(150);
+    const share = await page.evaluate(() => ({ focus: document.activeElement.id, value: document.getElementById('share-url').value }));
+    report.check(share.focus === 'share-url' && share.value.includes('#view='), 'Share puts focus on the link to copy', share.focus);
+  }
+  const popup = page.context().waitForEvent('page', { timeout: 20000 }).catch(() => null);
+  await step(`el.id === 'btn-brief'`, 'Open brief', 'Enter', { back: true });
+  const brief = await popup;
+  if (brief) {
+    await brief.waitForLoadState('domcontentloaded').catch(() => {});
+    const title = await brief.title().catch(() => '');
+    report.check(/Foreign-born share/.test(title) || /Foreign-born share/.test(await brief.content().catch(() => '')), 'the brief opened for the measure on screen', title);
+    await brief.close();
+  } else {
+    report.check(false, 'the brief opened in a new tab');
+  }
+  if (mode === 'static') {
+    const download = page.waitForEvent('download', { timeout: 20000 }).catch(() => null);
+    await step(`el.id === 'btn-export'`, 'Download CSV', 'Enter', { back: true });
+    const d = await download;
+    report.check(Boolean(d) && /county36029/.test(d.suggestedFilename()), 'the CSV downloads for Erie County\'s tracts', d && d.suggestedFilename());
+  } else {
+    await step(`el.id === 'btn-export'`, 'Export', 'Enter', { back: true });
+    await page.waitForSelector('#export-result:not([hidden]) #export-files a', { timeout: 30000 }).catch(() => {});
+    const files = await page.$$eval('#export-files li a:first-child', (as) => as.map((a) => a.textContent));
+    report.check(files.includes('data.csv') && files.includes('brief.html'), 'the export bundle is written and linked', files);
+  }
+  await shot(page, `${mode}-390-keyboard-end`);
+  await finish(app, `${mode} keyboard`);
+}
+
+/* ------------------------------------------------------------ run */
+
+const targets = [['local', args.local], ['static', args.static]].filter(([, u]) => u);
+for (const [mode, url] of targets) {
+  await countyToTract(mode, url);
+  await outsideComparison(mode, url);
+  if (mode === 'static') await shareAndReload(url);
+  await loadFailure(mode, url);
+  await narrowLayout(mode, url);
+  await keyboardOnly(mode, url);
+}
+await browser.close();
+const body = report.write({
+  run_at: new Date().toISOString(),
+  targets: Object.fromEntries(targets),
+  browser: 'Chromium via Playwright (headless shell)',
+  desktop_viewport: `${DESKTOP.width}×${DESKTOP.height}`,
+  narrow_viewport: `${NARROW.width}×${NARROW.height}`,
+});
+console.log(`\n${body.failures} failing check(s). Report: ${path.join(dir, 'report.md')}`);
+process.exit(body.failures ? 1 : 0);
