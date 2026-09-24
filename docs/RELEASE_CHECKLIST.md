@@ -19,6 +19,10 @@ one, and what is still open. Written to be checked, not to reassure.
    York City, not the state).
 5. Confirm in the browser's network panel: no request outside the site
    prefix, no `/api/` request, no console error.
+5a. Run the browser acceptance recipe in `docs/ACCEPTANCE.md` against the
+   local service and the static site: `tests/acceptance/journeys.mjs` must
+   report 0 failing checks. Then run `tests/acceptance/briefs.mjs` and **look
+   at every page PNG it writes**; its checks are not visual acceptance.
 6. Read `site/data/manifest.json`: release, citation, tables, build manifest
    id, counts, join reports, and what this copy cannot do.
 7. Publish, then compare the deployed files against `site/data/digests.json`.
@@ -27,7 +31,7 @@ one, and what is still open. Written to be checked, not to reassure.
 
 | | State |
 | --- | --- |
-| Offline test suite | 461 Python tests, 3 skips on Linux (live network), also passing with every text-mode write forced to CRLF as an imitation of Windows; more skips on Windows. Node: 40 page-logic tests. Results on Windows itself are recorded by the independent reviewer, not here |
+| Offline test suite | 466 Python tests, 3 skips on Linux (live network), also passing with every text-mode write forced to CRLF as an imitation of Windows; more skips on Windows. Node: 42 page-logic tests. Results on Windows itself are recorded by the independent reviewer, not here |
 | Data | Official ACS 2019-2023 five-year aggregates for every county and census tract in New York State, built from a recorded manifest; New York City is its documented five-borough subset and the default view |
 | Retrieval sources | Table-based Summary File tables B01003, B05002, B05006, B06004B, B06009 (`acsdt5y2023-*.dat`), the release's geography file `Geos20235YR.txt`, and GENZ2023 cartographic boundaries `cb_2023_36_tract_500k.zip` and `cb_2023_us_county_500k.zip`. Keyless; every artifact has a manifest record with the digest of the complete upstream file |
 | Coverage | Release roster: 1 state, 62 counties, 5,411 tracts. Table rows: 1, 62, 5,396. Boundaries: 62 counties, 5,395 tracts. 15 listed tracts have no table row (14 in Suffolk, 1 in Ulster) and are shown as unavailable; 16 water tracts (population 0) have rows but no polygon and are listed by GEOID. 0 boundary features without observations. Each tract's county agrees with the boundary file's STATEFP and COUNTYFP (5,395 of 5,395) |
@@ -44,14 +48,32 @@ one, and what is still open. Written to be checked, not to reassure.
 | Saved views and export bundles | Local service only, and the published copy says so rather than approximating them |
 | Comparing two reference periods | Blocked at every level; boundary equivalence between vintages is not established |
 
+## Browser and print evidence (release-readiness pass)
+
+Run on 2026-09-24 at commit `143fece`, against the live 2019-2023 build.
+Targets: the local service (`http://127.0.0.1:8765/`) and the static site
+served under `/census-explorer/`. Tool: headless Chromium through the
+environment's existing Playwright. This is the implementer's own run; the
+independent Windows test run and the published-asset digest comparison
+belong to the reviewer and are not claimed here.
+
+| Evidence | Result |
+| --- | --- |
+| `journeys.mjs`, both targets | 125 checks passed, 0 failed (31 s). Covers county to tract then share and compare; a comparison kept across a scope change; share links on reload, including older and stale links (static); and a genuine load failure with recovery. |
+| Narrow layout | Measured `innerWidth` 390, `clientWidth` 390, `devicePixelRatio` 1. No horizontal overflow, and no control past the viewport or with a cut-off label, on the first view, on New York State counties, or on Erie tracts with a comparison. The only control under 24 px is the inline "Which, and why" toggle inside a sentence of the static notice. |
+| Keyboard only at 390 px | Done with Tab, Shift+Tab, Enter, Space, arrows and typing, with visible focus at every stop: New York State → search Erie County → Explore its tracts → a measure → the table (one tab stop) → compare two tracts → Share (static) → Open brief → Download CSV or Export. The longest single reach was 47 Tab presses backwards, from the table to Download CSV. |
+| Defects found and fixed in this pass | Focus fell to the page after choosing a search result, and after any control that replaces itself (Explore, Reset, the scope-switching comparison action, Try again). The 390 px table scrolled inside a three-row box. Two targets were under 24 px. Chart grid lines ran through place names. The starter text said "list on the left". Commit `a3d11f3`. |
+| Printed briefs | `briefs.mjs` printed four briefs to A4 PDF: from each target, the Bronx naturalised share with the New York City reference, and the 25-row New York City tract table for the Dominican-Republic share. Local: 3 and 5 pages; published: 2 and 3 pages. Every one of the 13 pages was opened in Chromium's PDF viewer, saved as an image, and inspected by eye. |
+| What the pages show | No clipped columns. No row split across a page; table headers repeat on continuation pages. Headings, the denominator, margins of error, no-data reasons, sources and reproducibility details are all visible. |
+| Print defects found and fixed | The local chart's tick labels overlapped its subtitle. The published brief printed doubled full stops. A New York City tract brief quoted the state's 16 boundary-less tracts instead of its own 3, with a population of "0.0". Commit `35fc9b3`. |
+
 ## Open items
 
-- **PDF pagination is unverified.** The published brief sets `@page` size and
-  margins and avoids breaking rows, but no one has looked at the paginated
-  output. The browser tooling available in this environment blocks inspecting
-  the generated blob tab, and that policy was not worked around. This is a
-  gap in visual evidence only: the brief's content is covered by unit tests
-  and by reading the rendered HTML.
+- **Print evidence is Chromium only.** The pages above were printed by
+  Chromium and drawn by Chromium's own PDF viewer. Firefox, Safari and
+  physical printers may paginate differently, and US Letter paper was not
+  checked. The blob tab itself was still never opened by a script; the
+  published brief's HTML was read back from the blob the page creates.
 - **No user research.** The three starting examples are a design decision
   about first use, not a validated one. Nothing about customer demand or
   willingness to pay has been tested.
@@ -64,8 +86,16 @@ one, and what is still open. Written to be checked, not to reassure.
   derives for every share by the documented proportion formula. No
   aggregation variance is computed for the state.
 - **Accessibility has been checked, not audited.** Keyboard reach, focus
-  order, focus movement and small-screen layout were exercised in Chromium.
-  No screen-reader pass and no formal WCAG audit has been done.
+  visibility and focus movement were exercised, and the 390 px layout was
+  measured, in headless Chromium with emulated viewports. There has been no
+  screen-reader pass, no formal WCAG audit, no physical phone and no touch
+  gestures. Keyboard routes to Share, brief and export take 30 to 47 Tab
+  presses from the table: reachable, but long.
+- **A share margin can exceed 100 points.** For tracts with very small
+  denominators, the documented derived-margin formula yields margins such as
+  ±1300.0 percentage points, and the brief prints them as computed. They are
+  marked "wide — read as indicative". This was observed, not changed: no
+  computation defect was reproduced.
 - **Per-shape keyboard focus on the map stops at 60 features.** At tract
   level, and for the 62 counties statewide, the table and the place search
   are the keyboard route, and the map's accessible name says so.

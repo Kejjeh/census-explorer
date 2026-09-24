@@ -35,7 +35,7 @@ python -B -m unittest discover -s tests -t .
 Expected on Linux (18.8 s measured):
 
 ```
-Ran 461 tests in 18.5s
+Ran 466 tests in 17.5s
 OK (skipped=3)
 ```
 
