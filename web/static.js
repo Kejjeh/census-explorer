@@ -14,6 +14,12 @@
  */
 'use strict';
 
+// The scope rules live in core.js, which the page loads first. Under Node the
+// tests load this file on its own, so it asks for them directly.
+const SCOPE_RULES = (typeof module === 'object' && module.exports)
+  ? require('./core.js')
+  : { parseScope, resolveScope, describeScope };
+
 /* ------------------------------------------------------------- decoding */
 
 /**
@@ -241,10 +247,79 @@ function createStaticBackend(config) {
     return v === null || v === '' ? fallback : v;
   }
 
-  function selectedAreas(query, dataset, level) {
+  /**
+   * The places a request covers, resolved exactly as the service resolves
+   * them. A request with no scope is New York City, so a link made before the
+   * build covered the state still shows the city and nothing more.
+   */
+  function scopeOf(query, dataset, catalog, level) {
+    const scope = SCOPE_RULES.parseScope(query.get('scope'));
+    const boroughs = catalog.boroughs || [];
+    const statewide = Boolean(catalog.statewide);
+    const geoids = SCOPE_RULES.resolveScope(scope, level, dataset.areas, boroughs, statewide);
+    const counties = new Set(dataset.areas.filter((a) => a.level === 'county').map((a) => a.geoid));
+    const partial = scope.kind === 'nyc' && boroughs.some((g) => !counties.has(g));
+    let countyName = null;
+    if (scope.county) {
+      const c = dataset.areas.find((a) => a.geoid === scope.county);
+      countyName = c ? c.name : scope.county;
+      if (boroughs.includes(scope.county)) countyName += ', a New York City borough';
+    }
+    return {
+      scope, geoids,
+      label: SCOPE_RULES.describeScope(scope, level, geoids.length, countyName, partial),
+    };
+  }
+
+  function selectedAreas(query, dataset, catalog, level) {
+    const within = scopeOf(query, dataset, catalog, level);
     const raw = query.get('areas');
-    if (raw) return raw.split(',').filter(Boolean);
-    return dataset.areas.filter((a) => a.level === level).map((a) => a.geoid);
+    if (!raw) return { areas: within.geoids, scope: within };
+    const requested = raw.split(',').filter(Boolean);
+    const inView = new Set(within.geoids);
+    const atLevel = new Set(dataset.areas.filter((a) => a.level === level).map((a) => a.geoid));
+    const outside = requested.filter((g) => atLevel.has(g) && !inView.has(g));
+    if (outside.length) {
+      throw new Error(`${outside.length} requested place(s) are outside the scope ` +
+        `'${within.scope.code}': ${outside.slice(0, 5).join(', ')}`);
+    }
+    return { areas: requested, scope: within };
+  }
+
+  /** The one county a tract selection sits in, or null. */
+  function containingCounty(query, dataset, catalog, level) {
+    if (level !== 'tract') return null;
+    const { areas, scope } = selectedAreas(query, dataset, catalog, level);
+    if (scope.scope.kind === 'county') return scope.scope.county;
+    const counties = [...new Set(areas.map((g) => g.slice(0, 5)))];
+    return counties.length === 1 ? counties[0] : null;
+  }
+
+  /**
+   * A reference the build computed, looked up for this view. Nothing is
+   * computed here; one the build did not write is reported as unavailable.
+   */
+  function referenceFor(wanted, doc, query, dataset, catalog) {
+    const level = param(query, 'level', 'county');
+    if (wanted === 'nyc' && doc.nyc && doc.nyc[level]) return doc.nyc[level];
+    if (wanted === 'nys' && doc.nys && doc.nys[level]) return doc.nys[level];
+    if (wanted === 'containing_county' || wanted === 'containing_borough') {
+      const county = containingCounty(query, dataset, catalog, level);
+      const found = county && (doc.containing_county || {})[county];
+      if (found) return found;
+      return {
+        benchmark_id: wanted, label: 'The containing county', available: false,
+        unavailable_reason: 'this reference applies to tracts inside a single ' +
+          'county, and this view does not sit in one',
+      };
+    }
+    return {
+      benchmark_id: wanted,
+      label: wanted === 'selected' ? 'The selected places combined' : wanted,
+      available: false,
+      unavailable_reason: (config.unsupported || {}).selected_benchmark
+        || 'This reference is not available in the published site.',
+    };
   }
 
   async function get(path, query) {
@@ -267,25 +342,28 @@ function createStaticBackend(config) {
 
     if (path === '/api/benchmarks') {
       const level = param(query, 'level', 'county');
-      const doc = await file(`benchmarks/${level}.json`);
+      const [doc, dataset, catalog] = await Promise.all([
+        file(`benchmarks/${level}.json`), file('dataset.json'), file('catalog.json'),
+      ]);
       // A reference that cannot be built here is still listed, so the reason
-      // is visible rather than the option silently missing.
-      return doc;
+      // is visible rather than the option silently missing. The containing
+      // county is listed only when the view sits in one county, as the
+      // service lists it.
+      const out = (doc.benchmarks || []).filter((b) => b.benchmark_id !== 'selected');
+      const county = containingCounty(query, dataset, catalog, level);
+      const containing = county && (doc.containing_county || {})[county];
+      if (containing) out.push(containing);
+      out.push(...(doc.benchmarks || []).filter((b) => b.benchmark_id === 'selected'));
+      return { benchmarks: out };
     }
 
     if (path === '/api/benchmark') {
       const measureId = param(query, 'measure');
       const wanted = param(query, 'benchmark', 'none');
-      const doc = await file(`reference/${measureId}.json`);
-      const level = param(query, 'level', 'county');
-      if (wanted === 'nyc' && doc.nyc && doc.nyc[level]) return doc.nyc[level];
-      return {
-        benchmark_id: wanted,
-        label: wanted === 'selected' ? 'The selected places combined' : wanted,
-        available: false,
-        unavailable_reason: (config.unsupported || {}).selected_benchmark
-          || 'This reference is not available in the published site.',
-      };
+      const [doc, dataset, catalog] = await Promise.all([
+        file(`reference/${measureId}.json`), file('dataset.json'), file('catalog.json'),
+      ]);
+      return referenceFor(wanted, doc, query, dataset, catalog);
     }
 
     if (path === '/api/quality') {
@@ -295,14 +373,12 @@ function createStaticBackend(config) {
         file('dataset.json'), file(`quality/${level}.json`), file('catalog.json'),
         valuesFor(measureId), file(`reference/${measureId}.json`),
       ]);
-      const areas = selectedAreas(query, dataset, level);
+      const { areas, scope } = selectedAreas(query, dataset, catalog, level);
       const measure = (catalog.levels[level].groups || [])
         .flatMap((g) => g.measures).find((m) => m.measure_id === measureId);
       const benchmarkId = param(query, 'benchmark', 'none');
-      let benchmark = null;
-      if (benchmarkId === 'nyc' && reference.nyc && reference.nyc[level]) {
-        benchmark = reference.nyc[level];
-      }
+      const benchmark = benchmarkId === 'none' ? null
+        : referenceFor(benchmarkId, reference, query, dataset, catalog);
       const question = (reference.questions || {})[level] || {};
       return {
         quality: {
@@ -314,7 +390,9 @@ function createStaticBackend(config) {
         selection: {
           release_id: dataset.release.release_id, level,
           measure_id: measureId, areas, area_count: areas.length,
-          requested_areas: areas, excluded_areas: [], exclusion_reason: '',
+          requested_areas: query.get('areas') ? areas : [],
+          excluded_areas: [], exclusion_reason: '',
+          scope: scope.scope.code, scope_label: scope.label,
         },
         question_id: areas.length === 1 ? question.one : question.many,
       };

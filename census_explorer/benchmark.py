@@ -27,6 +27,13 @@ from .measures import Z_90
 MAX_COMPONENTS_FOR_MOE = 12
 
 NYC = "nyc"
+#: The state's own published row. Offered only when the build covers the state.
+NYS = "nys"
+#: The published row of the one county a set of tracts sits in. Called a
+#: borough in words only when the county is one of New York City's five.
+CONTAINING_COUNTY = "containing_county"
+#: The identifier this reference had before the build covered the state. Still
+#: accepted, so a link or saved project made then keeps working.
 CONTAINING_BOROUGH = "containing_borough"
 SELECTED = "selected"
 NONE = "none"
@@ -229,6 +236,43 @@ def aggregate(measure: MeasureDef, values: dict[str, dict], geoids: list[str],
     return bench
 
 
+def published(measure: MeasureDef, values: dict[str, dict], geoid: str,
+              benchmark_id: str, label: str, basis: str) -> Benchmark:
+    """One area's own figure, read as it is, used as a reference.
+
+    Nothing is added up. The estimate and margin of error are the ones this
+    build already shows for that area in the table: a published count and its
+    published margin of error, or a share computed from its published counts
+    by the same reviewed rules as every other share. When the area's margin of
+    error is unavailable, so is the reference's; it is never taken as zero.
+    """
+    v = values.get(geoid) or {}
+    if v.get("es") != "ok" or v.get("e") is None:
+        reason = (v.get("er") or
+                  f"{geoid} has no published value for this measure in this build")
+        return unavailable(benchmark_id, label, reason, measure.unit)
+    bench = Benchmark(benchmark_id=benchmark_id, label=label, basis=basis,
+                      unit=measure.unit, estimate=float(v["e"]),
+                      numerator=v.get("n"), denominator=v.get("d"),
+                      component_count=1, components=[geoid])
+    if measure.kind == "count":
+        bench.numerator = float(v["e"])
+    if v.get("ms") != "ok" or v.get("m") is None:
+        bench.moe_status = "unavailable"
+        bench.moe_reason = (
+            (v.get("mr") or f"{geoid} has no usable margin of error for this measure")
+            + ". Missing uncertainty is unavailable, not zero.")
+        return bench
+    bench.moe = float(v["m"])
+    if v.get("ctl") is True and bench.moe == 0:
+        bench.controlled = True
+        bench.moe_reason = (
+            "this figure is controlled to an independent population estimate, so "
+            "it carries no sampling error. This is not a measured margin of error "
+            "of zero.")
+    return bench
+
+
 def cv_percent(bench: Benchmark) -> float | None:
     if bench.unit != "persons" or bench.moe_status != "ok" or not bench.estimate:
         return None
@@ -236,8 +280,16 @@ def cv_percent(bench: Benchmark) -> float | None:
 
 
 def options(level: str, selected_areas: list[str], all_counties: list[str],
-            county_names: dict[str, str]) -> list[dict]:
-    """The benchmarks that make sense for this selection, in words."""
+            county_names: dict[str, str], *, scope: str = "nyc",
+            statewide: bool = False, boroughs: list[str] | None = None
+            ) -> list[dict]:
+    """The references that make sense for this selection, in words.
+
+    Only references this selection can actually be read against are listed:
+    the containing county is offered when every place in view sits in one
+    county, not as a promise that the build then refuses.
+    """
+    boroughs = list(boroughs if boroughs is not None else all_counties)
     out = [{"benchmark_id": NONE, "label": "No reference",
             "description": "Show the selected places on their own."}]
     out.append({
@@ -245,18 +297,34 @@ def options(level: str, selected_areas: list[str], all_counties: list[str],
         "label": "New York City (all five boroughs)",
         "description": ("Built by adding the five boroughs' underlying counts and "
                         "recomputing the measure from the totals. New York City is "
-                        "exactly these five counties."),
+                        "exactly these five counties, whatever else is in view."),
     })
-    if level == "tract":
-        boroughs = sorted({g[:5] for g in selected_areas}) or all_counties
-        names = ", ".join(county_names.get(b, b) for b in boroughs[:5])
+    if statewide:
         out.append({
-            "benchmark_id": CONTAINING_BOROUGH,
-            "label": f"The containing borough ({names})" if len(boroughs) == 1
-                     else "Each tract's own borough",
-            "description": ("Each tract is read against the published figure for "
-                            "the borough it sits in."),
+            "benchmark_id": NYS,
+            "label": "New York State (published state figure)",
+            "description": ("The state's own row in the same release, read as "
+                            "published. It is not built by adding or averaging "
+                            "counties."),
         })
+    if level == "tract":
+        county = None
+        if scope.startswith("county:"):
+            county = scope.split(":", 1)[1]
+        else:
+            counties = sorted({g[:5] for g in selected_areas})
+            if len(counties) == 1:
+                county = counties[0]
+        if county:
+            name = county_names.get(county, county)
+            word = "borough" if county in boroughs else "county"
+            out.append({
+                "benchmark_id": CONTAINING_COUNTY,
+                "county": county,
+                "label": f"The containing {word} ({name})",
+                "description": (f"Each tract is read against the published figure "
+                                f"for the {word} it sits in."),
+            })
     if len(selected_areas) > 1:
         out.append({
             "benchmark_id": SELECTED,

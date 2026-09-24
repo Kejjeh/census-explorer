@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import benchmark as benchmark_mod
+from . import scope as scope_mod
 from . import provenance, questions, server
 
 #: Per-area keys, grouped by how they are encoded. A key that appears in a
@@ -414,7 +415,12 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
 
     areas = dataset["areas"]
     geoids = [a["geoid"] for a in areas]
-    levels = sorted({a["level"] for a in areas})
+    # The map levels only. A statewide build also carries the state's own
+    # row, which is read as a reference value and never drawn.
+    levels = [lv for lv in server.LEVELS if any(a["level"] == lv for a in areas)]
+    statewide = state.statewide(release_id)
+    boroughs = list(state.config.borough_geoids)
+    names = {a["geoid"]: a["name"] for a in areas}
 
     data = out_dir / "data"
 
@@ -482,24 +488,44 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
         if not level_catalog:
             log(f"  no measure available at {level}; skipping")
             continue
+        # The sentences are the same for every scope; they are drawn from New
+        # York City's places, which every build has.
+        city_areas = scope_mod.resolve(scope_mod.Scope(scope_mod.NYC), level,
+                                       areas, boroughs, statewide)
         written += _write(
             data / "quality" / f"{level}.json",
-            _quality_cases(state, release_id, level, level_areas,
+            _quality_cases(state, release_id, level, city_areas,
                            level_catalog[0].measure_id), files)
         # A representative selection, so every option the interface can offer
         # is listed. One that this build cannot compute is marked unavailable
         # with a reason rather than quietly left out.
+        # The containing county is listed once per county, with the label the
+        # service would give it, and the page offers only the one whose
+        # county is in view. Before this, one "containing borough" option was
+        # listed for every tract view and then could not be served.
         options = benchmark_mod.options(
-            level, level_areas[:2], state.config.county_geoids,
-            {a["geoid"]: a["name"] for a in areas})
+            level, city_areas[:2], state.config.county_geoids, names,
+            statewide=statewide, boroughs=boroughs)
+        options = [o for o in options
+                   if o["benchmark_id"] != benchmark_mod.CONTAINING_COUNTY]
         for option in options:
             if option["benchmark_id"] == benchmark_mod.SELECTED:
                 option["available_in_static_build"] = False
                 option["unavailable_reason"] = UNSUPPORTED["selected_benchmark"]
             else:
                 option["available_in_static_build"] = True
+        containing = {}
+        if level == "tract":
+            for county in sorted({g[:5] for g in level_areas}):
+                opt = next(o for o in benchmark_mod.options(
+                    level, [], state.config.county_geoids, names,
+                    scope=f"county:{county}", boroughs=boroughs)
+                    if o["benchmark_id"] == benchmark_mod.CONTAINING_COUNTY)
+                opt["available_in_static_build"] = True
+                containing[county] = opt
         written += _write(data / "benchmarks" / f"{level}.json",
-                          {"benchmarks": options}, files)
+                          {"benchmarks": options,
+                           "containing_county": containing}, files)
 
     # -- per-measure values, references and question resolution ------------
     catalog_ids = sorted({o.measure_id
@@ -514,17 +540,32 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
                            **_encode_values(values, geoids)}, files)
 
         references: dict[str, Any] = {}
+        state_refs: dict[str, Any] = {}
+        county_refs: dict[str, Any] = {}
         questions_for: dict[str, Any] = {}
         for level in levels:
-            level_areas = [a["geoid"] for a in areas if a["level"] == level]
             if measure_id not in {o.measure_id
                                   for o in questions.catalog(dataset, level)}:
                 continue
+            # Every reference is computed by the service's own code, from a
+            # selection the service itself resolved; the page only looks
+            # them up.
             sel = server.build_selection(state, {
                 "release_id": release_id, "measure_id": measure_id,
-                "level": level, "areas": level_areas})
-            bench = server.build_benchmark(state, sel, benchmark_mod.NYC)
-            references[level] = bench.to_json()
+                "level": level})
+            references[level] = server.build_benchmark(
+                state, sel, benchmark_mod.NYC).to_json()
+            if statewide:
+                state_refs[level] = server.build_benchmark(
+                    state, sel, benchmark_mod.NYS).to_json()
+            if level == "tract":
+                for county in sorted({a["geoid"] for a in areas
+                                      if a["level"] == "county"}):
+                    csel = server.build_selection(state, {
+                        "release_id": release_id, "measure_id": measure_id,
+                        "level": level, "scope": f"county:{county}"})
+                    county_refs[county] = server.build_benchmark(
+                        state, csel, benchmark_mod.CONTAINING_COUNTY).to_json()
             questions_for[level] = {
                 "one": questions.question_for(measure_id, level, 1),
                 "many": questions.question_for(measure_id, level, 2),
@@ -532,6 +573,8 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
         written += _write(data / "reference" / f"{measure_id}.json",
                           {"measure_id": measure_id,
                            "nyc": references,
+                           "nys": state_refs,
+                           "containing_county": county_refs,
                            "questions": questions_for}, files)
 
     # -- the manifest a reader can check the site against ------------------

@@ -44,6 +44,10 @@ class Selection:
     exclusion_reason: str = ""
     max_chart_rows: int = DEFAULT_MAX_CHART_ROWS
     compatibility: dict[str, Any] | None = None
+    #: What the map, table, CSV, brief and share link all cover, as a code
+    #: ("nyc", "nys", "county:36029") and in words with its size.
+    scope: str = ""
+    scope_label: str = ""
 
     @property
     def primary_release(self) -> Release:
@@ -89,6 +93,8 @@ class Selection:
             "classes": self.classes,
             "cut_points": self.cut_points,
             "max_chart_rows": self.max_chart_rows,
+            "scope": self.scope,
+            "scope_label": self.scope_label,
         }
 
 

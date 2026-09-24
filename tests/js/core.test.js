@@ -14,6 +14,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   createLoadGate, classBreaks, classIndex, legendRanges, coverageSentences,
+  parseScope, resolveScope, pageWindow, pageOfIndex, intervalChartModel,
+  intervalChartSvg,
 } = require('../../web/core.js');
 
 /** A promise whose settlement this test controls. */
@@ -240,6 +242,109 @@ test('a build with every area drawn says nothing build-wide', () => {
   });
   assert.strictEqual(lines.length, 1);
   assert.match(lines[0], /Every one of the 5 boroughs in view is drawn\./);
+});
+
+// ---------------------------------------------------------------- scope
+
+test('no scope is the city, and an unknown one is refused', () => {
+  assert.strictEqual(parseScope(null).code, 'nyc');
+  assert.strictEqual(parseScope('').code, 'nyc');
+  assert.strictEqual(parseScope('county:36029').county, '36029');
+  ['NYC', 'county:3602', 'state', 'county:36029;x'].forEach((bad) => {
+    assert.throws(() => parseScope(bad), /unknown scope/);
+  });
+});
+
+test('a county scope lists only its own tracts, and only at tract level', () => {
+  const areas = [
+    { geoid: '36005', level: 'county' }, { geoid: '36029', level: 'county' },
+    { geoid: '36005000100', level: 'tract' }, { geoid: '36029016600', level: 'tract' },
+    { geoid: '36029990000', level: 'tract' },
+  ];
+  assert.deepStrictEqual(
+    resolveScope(parseScope('county:36029'), 'tract', areas, ['36005'], true),
+    ['36029016600', '36029990000']);
+  assert.throws(() => resolveScope(parseScope('county:36029'), 'county', areas, ['36005'], true),
+    /switch to the tract level/);
+  assert.throws(() => resolveScope(parseScope('nys'), 'tract', areas, ['36005'], false),
+    /does not cover the whole state/);
+});
+
+// ----------------------------------------------------------- pagination
+
+test('every row of a long list is on some page, and no page is past the end', () => {
+  const total = 5411; const size = 50;
+  const seen = new Set();
+  const first = pageWindow(total, size, 0);
+  for (let p = 0; p < first.pages; p += 1) {
+    const w = pageWindow(total, size, p);
+    for (let i = w.start; i < w.end; i += 1) seen.add(i);
+  }
+  assert.strictEqual(seen.size, total);
+  assert.strictEqual(first.pages, 109);
+  const past = pageWindow(total, size, 999);
+  assert.strictEqual(past.page, 108);
+  assert.deepStrictEqual([past.start, past.end], [5400, 5411]);
+  assert.deepStrictEqual(pageWindow(0, 25, 3), { page: 0, pages: 1, start: 0, end: 0, size: 25, total: 0 });
+  assert.strictEqual(pageOfIndex(5410, 50), 108);
+  assert.strictEqual(pageOfIndex(-1, 50), 0);
+});
+
+// ------------------------------------------------------ comparison chart
+
+const ok = (e, m) => ({ es: 'ok', e, ms: 'ok', m });
+
+test('the axis includes zero and every interval in full', () => {
+  const model = intervalChartModel({ unit: 'percent', rows: [
+    { key: 'a', label: 'A', value: ok(34.2, 1.1) }, { key: 'b', label: 'B', value: ok(58.9, 2.4) },
+  ] });
+  assert.strictEqual(model.domain[0], 0);
+  assert.ok(model.domain[1] >= 61.3);
+  assert.ok(model.domain[1] <= 100);
+  assert.ok(model.ticks.includes(0));
+  assert.deepStrictEqual(model.notes, []);
+});
+
+test('an interval past a share\'s possible range widens the axis and says so', () => {
+  const model = intervalChartModel({ unit: 'percent', rows: [
+    { key: 'a', label: 'A', value: ok(97, 6) }, { key: 'b', label: 'B', value: ok(2, 3) },
+  ] });
+  assert.ok(model.domain[1] >= 103, 'the upper end is not cut off');
+  assert.ok(model.domain[0] <= -1, 'the lower end is not cut off');
+  assert.strictEqual(model.notes.length, 2);
+  assert.match(model.notes.join(' '), /above 100%/);
+  assert.match(model.notes.join(' '), /below zero/);
+});
+
+test('missing uncertainty, a controlled total, no estimate and zero are all distinct', () => {
+  const model = intervalChartModel({ unit: 'persons', rows: [
+    { key: 'z', label: 'Zero', value: ok(0, 12) },
+    { key: 'c', label: 'Controlled', value: { es: 'ok', e: 1200, ms: 'ok', m: 0, ctl: true } },
+    { key: 'n', label: 'No MOE', value: { es: 'ok', e: 800, ms: 'unavailable' } },
+    { key: 'x', label: 'None', value: { es: 'unavailable' }, reason: 'too few sample cases' },
+  ] });
+  const byKey = Object.fromEntries(model.rows.map((r) => [r.key, r]));
+  assert.strictEqual(byKey.z.state, 'interval');
+  assert.strictEqual(byKey.z.e, 0, 'a zero estimate is drawn at zero, not treated as missing');
+  assert.strictEqual(byKey.c.state, 'controlled');
+  assert.strictEqual(byKey.c.lo, null);
+  assert.strictEqual(byKey.n.state, 'no_moe');
+  assert.strictEqual(byKey.n.m, null, 'a missing margin is not a zero-width one');
+  assert.strictEqual(byKey.x.state, 'no_estimate');
+  const svg = intervalChartSvg(model, { title: 'T', desc: 'D' });
+  assert.match(svg, /role="img"/);
+  assert.match(svg, /<title id="cmp-chart-t">T<\/title>/);
+  assert.match(svg, /margin of error unavailable/);
+  assert.match(svg, /controlled total/);
+  assert.match(svg, /not drawn: too few sample cases/);
+  assert.strictEqual((svg.match(/class="ic-interval"/g) || []).length, 1);
+  assert.doesNotMatch(svg, /significan/i);
+});
+
+test('chart text is escaped', () => {
+  const model = intervalChartModel({ unit: 'persons', rows: [
+    { key: 'a', label: '<script>x</script>', value: ok(1, 1) }] });
+  assert.doesNotMatch(intervalChartSvg(model, {}), /<script>/);
 });
 
 require('./publish.test.js');

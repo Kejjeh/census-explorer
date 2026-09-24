@@ -544,7 +544,8 @@ def describe(question_id: str, option: MeasureOption, period_label: str,
 
 def describe_contents(option: MeasureOption, place_phrase: str, area_count: int,
                       level: str, period_label: str,
-                      benchmark_label: str | None = None) -> str:
+                      benchmark_label: str | None = None,
+                      county_noun: str = "boroughs") -> str:
     """What this brief contains, derived from the selection that built it.
 
     A question's own description says what that question is capable of
@@ -554,7 +555,8 @@ def describe_contents(option: MeasureOption, place_phrase: str, area_count: int,
     if area_count == 1:
         scope = f"for {place_phrase}"
     else:
-        noun = "census tracts" if level == "tract" else "boroughs"
+        # Counties are boroughs only inside New York City.
+        noun = "census tracts" if level == "tract" else county_noun
         scope = f"for {area_count:,} {noun}"
     sentence = (f"This brief reports one measure, {option.label}, {scope}, "
                 f"over {period_label}.")

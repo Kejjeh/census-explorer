@@ -30,7 +30,8 @@ from . import (benchmark as benchmark_mod, brief as brief_mod,
                compare as compare_mod, config as config_mod, exports, figures,
                geography as geography_mod, http_client, metadata as metadata_mod,
                projects as projects_mod, provenance, questions as questions_mod,
-               selection as selection_mod, snapshot as snapshot_mod)
+               selection as selection_mod, snapshot as snapshot_mod,
+               scope as scope_mod)
 from .redact import redact, redact_structure
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -206,6 +207,15 @@ class ServiceState:
     def areas(self, release_id: str) -> dict[str, dict]:
         return {a["geoid"]: a for a in self.dataset(release_id)["areas"]}
 
+    def statewide(self, release_id: str) -> bool:
+        """Whether this build covers the whole state.
+
+        Read from the build's own coverage record, not from the configuration:
+        a project configured for the state but still holding an older,
+        narrower build must not offer the state.
+        """
+        return bool(self.dataset(release_id).get("coverage"))
+
     def areas_at(self, release_id: str, level: str) -> set[str]:
         return {g for g, a in self.areas(release_id).items() if a["level"] == level}
 
@@ -325,6 +335,9 @@ def build_selection(state: ServiceState, payload: dict,
         measure_ids = list(spec["measure_ids"])
         level = spec["level"]
         requested_areas = list(spec.get("areas") or [])
+        # A project saved before scopes existed stored no scope, and meant New
+        # York City by it; that is what it replays as.
+        scope_code = spec.get("scope")
         releases = [release_from_json(r) for r in spec["releases"]]
         measures = [measure_from_json(m) for m in spec["measures"]]
         classes = int(spec.get("classes") or 5)
@@ -341,6 +354,7 @@ def build_selection(state: ServiceState, payload: dict,
             raise ValueError("measure_id or measure_ids is required")
         level = payload.get("level", "county")
         requested_areas = list(payload.get("areas") or [])
+        scope_code = payload.get("scope")
         releases = [state.release(r) for r in release_ids]
         measures = [state.measure_def(release_ids[0], m) for m in measure_ids]
         classes = int(payload.get("classes") or 5)
@@ -371,12 +385,47 @@ def build_selection(state: ServiceState, payload: dict,
         for geoid, area in state.areas(rid).items():
             area_names.setdefault(geoid, area["name"])
 
-    return selection_mod.resolve(
+    # The scope bounds every output. Places named explicitly must lie inside
+    # it: a request for a Bronx tract while showing Erie County's tracts is a
+    # mistake to report, not a row to quietly add or drop.
+    scope = scope_mod.parse(scope_code)
+    # Resolved against every release in the view. A comparison with a release
+    # that only covers New York City cannot be scoped to the state: it would
+    # be labelled with the state and silently hold only the city.
+    per_release = {rid: set(scope_mod.resolve(
+        scope, level, state.dataset(rid)["areas"],
+        state.config.borough_geoids, state.statewide(rid))) for rid in release_ids}
+    in_scope = sorted(per_release[release_ids[0]])
+    universe = set(in_scope)
+    # Only a place that exists at this level but lies outside the scope is
+    # refused here. One that does not exist at all goes on to be reported as
+    # excluded, with its reason, exactly as before scopes existed.
+    at_level = state.areas_at(release_ids[0], level)
+    outside = [g for g in requested_areas if g in at_level and g not in universe]
+    if outside:
+        raise ValueError(
+            f"{len(outside)} requested place(s) are outside the scope "
+            f"{scope.code!r}: {', '.join(outside[:5])}")
+
+    sel = selection_mod.resolve(
         releases=releases, measures=measures, level=level,
-        areas_by_release={rid: state.areas_at(rid, level) for rid in release_ids},
+        areas_by_release={rid: {g for g in state.areas_at(rid, level)
+                                if g in per_release[rid]} for rid in release_ids},
         area_names=area_names, requested_areas=requested_areas,
         classes=classes, cut_points=cut_points,
         comparable_geoids=comparable, compatibility=compat)
+    sel.scope = scope.code
+    county_name = None
+    if scope.county:
+        county_name = area_names.get(scope.county, scope.county)
+        if state.config.borough_alias(scope.county):
+            county_name += ", a New York City borough"
+    built_counties = state.areas_at(release_ids[0], "county")
+    partial = (scope.kind == scope_mod.NYC
+               and not set(state.config.borough_geoids) <= built_counties)
+    sel.scope_label = scope_mod.describe(scope, level, len(in_scope), county_name,
+                                         partial=partial)
+    return sel
 
 
 def selection_inputs(state: ServiceState, sel: selection_mod.Selection) -> list[dict]:
@@ -423,6 +472,7 @@ def make_snapshot(state: ServiceState, sel: selection_mod.Selection
             "measures": [m.to_json() for m in sel.measures],
             "level": sel.level,
             "areas": list(sel.requested_areas),
+            "scope": sel.scope,
             "classes": sel.classes,
             "cut_points": sel.cut_points,
         },
@@ -708,7 +758,7 @@ def quality_report(state: ServiceState, sel: selection_mod.Selection,
 #: What each geography level is called in the interface, and in what order it
 #: is offered. Keyed by the level names the built dataset uses.
 LEVEL_LABELS = {
-    "county": ("Boroughs", "five counties, each a New York City borough"),
+    "county": ("Counties", "counties; New York City's five are its boroughs"),
     "tract": ("Census tracts",
               "statistical areas published by the Census Bureau, not neighbourhoods"),
 }
@@ -760,6 +810,7 @@ def measure_catalog(state: ServiceState, release_id: str) -> dict:
         "period_label": dataset["release"]["period_label"],
         "product_label": dataset["release"]["product_label"],
         "levels": levels,
+        **scope_catalog(state, release_id),
         "level_order": [lv for lv in LEVEL_LABELS if lv in levels],
         # Worked examples a first-time reader can open. Each one resolves
         # against this build, so a card is offered only when the measure and
@@ -768,6 +819,69 @@ def measure_catalog(state: ServiceState, release_id: str) -> dict:
             dataset,
             lambda key: f"{state.config.state_fips}{key}",
             levels),
+    }
+
+
+#: How a region names its levels. New York City's counties are its boroughs;
+#: nowhere else is a county called a borough.
+REGION_LEVEL_LABELS = {
+    scope_mod.NYC: {
+        "county": ("Boroughs", "the five counties of New York City, each a borough"),
+        "tract": LEVEL_LABELS["tract"],
+    },
+    scope_mod.NYS: {
+        "county": ("Counties", "every county in New York State"),
+        "tract": LEVEL_LABELS["tract"],
+    },
+}
+
+
+def scope_catalog(state: ServiceState, release_id: str) -> dict:
+    """The regions and counties a reader can scope a view to, with sizes.
+
+    Counts are of built areas, so what the control says is what the map and
+    table will hold. A county's tract count includes tracts the release lists
+    without estimates; the table shows those as unavailable rather than
+    dropping them.
+    """
+    areas = state.dataset(release_id).get("areas", [])
+    boroughs = list(state.config.borough_geoids)
+    statewide = state.statewide(release_id)
+    tracts_in: dict[str, int] = {}
+    for a in areas:
+        if a["level"] == "tract":
+            tracts_in[a["geoid"][:5]] = tracts_in.get(a["geoid"][:5], 0) + 1
+    counties = sorted((a for a in areas if a["level"] == "county"),
+                      key=lambda a: a["name"])
+    regions = []
+    for code in ([scope_mod.NYC, scope_mod.NYS] if statewide else [scope_mod.NYC]):
+        counts = {}
+        for level in ("county", "tract"):
+            try:
+                counts[level] = len(scope_mod.resolve(
+                    scope_mod.Scope(code), level, areas, boroughs, statewide))
+            except scope_mod.ScopeError:
+                counts[level] = 0
+        regions.append({
+            "scope": code,
+            "label": "New York City" if code == scope_mod.NYC else "New York State",
+            "note": ("the five boroughs: Bronx, Kings, New York, Queens and "
+                     "Richmond counties" if code == scope_mod.NYC else
+                     "every county and census tract in the state"),
+            "counts": counts,
+            "level_labels": {lv: {"label": lab, "note": note}
+                             for lv, (lab, note) in REGION_LEVEL_LABELS[code].items()},
+        })
+    return {
+        "statewide": statewide,
+        "default_scope": scope_mod.DEFAULT,
+        "regions": regions,
+        "boroughs": boroughs,
+        "counties": [{
+            "geoid": a["geoid"], "name": a["name"],
+            "borough": bool(state.config.borough_alias(a["geoid"])),
+            "tract_count": tracts_in.get(a["geoid"], 0),
+        } for a in counties],
     }
 
 
@@ -791,11 +905,14 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
             f"measure '{measure.measure_id}' is not one of the options for the "
             f"question '{question_id}'")
 
+    whole_scope = bool(sel.scope_label) and not sel.requested_areas
     if len(sel.areas) == 1:
         places = sel.area_names.get(sel.areas[0], sel.areas[0])
     elif sel.level == "tract":
-        places = (f"{len(sel.areas):,} census tracts in New York City "
-                  "(statistical areas, not neighbourhoods)")
+        places = (f"{sel.scope_label if whole_scope else f'{len(sel.areas):,} census tracts'}"
+                  " (statistical areas, not neighbourhoods)")
+    elif whole_scope and len(sel.areas) > 5:
+        places = sel.scope_label
     else:
         places = ", ".join(sel.area_names.get(g, g) for g in sel.areas)
     summary = questions_mod.describe(question_id, option, release.period_label, places)
@@ -826,7 +943,9 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
 
     contents = questions_mod.describe_contents(
         option, places, len(sel.areas), sel.level, release.period_label,
-        bench["label"] if bench and bench.get("available") else None)
+        bench["label"] if bench and bench.get("available") else None,
+        county_noun=("boroughs" if all(state.config.borough_alias(g)
+                                       for g in sel.areas) else "counties"))
 
     limitations = questions_mod.base_limitations(question, sel.level)
     limitations.extend(measure.caveats)
@@ -916,24 +1035,43 @@ def build_benchmark(state: ServiceState, sel: selection_mod.Selection,
             "recomputed from the totals",
             required_members=members)
 
-    if benchmark_id == benchmark_mod.CONTAINING_BOROUGH:
-        boroughs = sorted({g[:5] for g in sel.areas})
-        if sel.level != "tract" or len(boroughs) != 1:
+    if benchmark_id == benchmark_mod.NYS:
+        label = "New York State (published state figure)"
+        fips = state.config.state_fips
+        if not state.statewide(release.release_id):
             return benchmark_mod.unavailable(
-                benchmark_id, "The containing borough",
-                "this reference applies to tracts inside a single borough; the "
-                "selection spans " + (f"{len(boroughs)} boroughs" if boroughs
-                                      else "no borough"), measure.unit)
-        borough = boroughs[0]
-        if borough not in state.areas_at(release.release_id, "county"):
+                benchmark_id, label,
+                "this build does not cover the whole state, so the state's "
+                "published row was not retrieved with it", measure.unit)
+        return benchmark_mod.published(
+            measure, values, fips, benchmark_id, label,
+            "the state's own published row in the same release, read as "
+            "published; not built by adding or averaging counties")
+
+    if benchmark_id in (benchmark_mod.CONTAINING_COUNTY,
+                        benchmark_mod.CONTAINING_BOROUGH):
+        counties = sorted({g[:5] for g in sel.areas})
+        if sel.scope.startswith("county:"):
+            counties = [sel.scope.split(":", 1)[1]]
+        word = ("borough" if len(counties) == 1
+                and state.config.borough_alias(counties[0]) else "county")
+        generic = f"The containing {word}"
+        if sel.level != "tract" or len(counties) != 1:
             return benchmark_mod.unavailable(
-                benchmark_id, "The containing borough",
-                "the borough's published value is not built for this release",
+                benchmark_id, generic,
+                "this reference applies to tracts inside a single county; the "
+                "selection spans " + (f"{len(counties)} counties" if counties
+                                      else "no county"), measure.unit)
+        county = counties[0]
+        if county not in state.areas_at(release.release_id, "county"):
+            return benchmark_mod.unavailable(
+                benchmark_id, generic,
+                f"the {word}'s published value is not built for this release",
                 measure.unit)
-        name = state.areas(release.release_id)[borough]["name"]
-        return benchmark_mod.aggregate(
-            measure, county_values, [borough], benchmark_id, name,
-            "the borough's own published figure, not an aggregate of its tracts")
+        name = state.areas(release.release_id)[county]["name"]
+        return benchmark_mod.published(
+            measure, county_values, county, benchmark_id, name,
+            f"the {word}'s own published figure, not an aggregate of its tracts")
 
     if benchmark_id == benchmark_mod.SELECTED:
         return benchmark_mod.aggregate(
@@ -1357,7 +1495,9 @@ class Handler(BaseHTTPRequestHandler):
             selected = [a for a in (one("areas", "") or "").split(",") if a]
             names = {g: a["name"] for g, a in st.areas(release).items()}
             return self._json({"benchmarks": benchmark_mod.options(
-                level, selected, st.config.county_geoids, names)})
+                level, selected, st.config.county_geoids, names,
+                scope=scope_mod.parse(one("scope")).code,
+                statewide=st.statewide(release))})
 
         if path == "/api/benchmark":
             sel = build_selection(st, _selection_payload(query))
@@ -1439,6 +1579,9 @@ def _selection_payload(query: dict[str, list[str]]) -> dict:
     areas = one("areas")
     if areas:
         payload["areas"] = [a for a in areas.split(",") if a]
+    scope = one("scope")
+    if scope:
+        payload["scope"] = scope
     return payload
 
 
