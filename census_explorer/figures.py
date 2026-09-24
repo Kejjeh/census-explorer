@@ -370,7 +370,9 @@ def group_chart_svg(*, rows: list[dict], title: str, subtitle: str, unit: str,
         disclosures = [scope_note] + disclosures
     label_w = 230
     row_h = 26 if len(series_labels) == 1 else 34
-    top = (22 if data_mode == "fixture" else 0) + 68
+    # The tick labels sit 16 px above the plot. At 68 their tops overlapped the
+    # subtitle's descenders (visible in the printed brief); 82 clears them.
+    top = (22 if data_mode == "fixture" else 0) + 82
     chart_h = max(1, len(rows)) * row_h
     footer_h = 40 + 13 * (len(source_lines) + len(disclosures))
     height = top + chart_h + 56 + footer_h

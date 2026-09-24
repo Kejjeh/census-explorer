@@ -81,6 +81,15 @@ test('brief keeps denominator, percentage-point MOE, scope and escaped source co
   assert.ok(!html.includes('<script>'));
   assert.ok(html.includes('&lt;script&gt;'));
 });
+test('brief sentences end with one full stop, whatever the notes end with', () => {
+  const html = publishedBrief({...input,
+    measure: {...input.measure, universe_note: 'Foreign-born population (B05002).', out_of: 'all foreign-born residents'},
+    benchmark: {available: true, label: 'NYC', estimate: 58.9, estimate_status: 'ok', moe_status: 'unavailable',
+      moe_reason: 'not quantified here.', basis: 'the five boroughs added together'}});
+  assert.ok(!/\.\./.test(html.replace(/\.\.\./g, '')), 'no doubled full stop');
+  assert.ok(html.includes('Universe: Foreign-born population (B05002). Denominator: all foreign-born residents.'));
+  assert.ok(html.includes('not quantified here. The five boroughs added together.'));
+});
 test('brief retains missing estimate, unavailable reference and controlled uncertainty', () => {
   const missing=publishedBrief({...input,values:{'001':{es:'missing',er:'suppressed'}},benchmark:{available:false,label:'NYC',unavailable_reason:'incomplete borough membership'}});
   assert.ok(missing.includes('No data — suppressed'));

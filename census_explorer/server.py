@@ -955,11 +955,24 @@ def brief_context(state: ServiceState, sel: selection_mod.Selection,
             "areas. The exported data contains every one of them.")
     for report in dataset.get("join_reports", []):
         if report["level"] == sel.level and report["unmatched_observation_count"]:
+            # Said of this selection first. A statewide build has more such areas
+            # than any one view, and quoting the build's total as if it described
+            # a New York City brief overstated what the brief's map leaves out.
+            unmatched = set(report.get("unmatched_observations") or [])
+            here = sum(1 for g in sel.areas if g in unmatched)
+            if here:
+                limitations.append(
+                    f"{here} of the {len(sel.areas):,} selected areas have no "
+                    "published boundary at this geography vintage and cannot be "
+                    "drawn on the map; they are still in the table and the data.")
+            pop = report.get("unmatched_observation_population")
+            pop_text = (f"{pop:,.0f}" if isinstance(pop, (int, float))
+                        else "not recorded")
             limitations.append(
-                f"{report['unmatched_observation_count']} area(s) at this level have "
-                "no published boundary at this geography vintage and cannot be drawn "
-                f"on the map (total population "
-                f"{report.get('unmatched_observation_population')}).")
+                f"Across the whole build, {report['unmatched_observation_count']} "
+                f"area(s) at this level have no boundary at this vintage (total "
+                f"population {pop_text}); {here} of them "
+                f"{'is' if here == 1 else 'are'} in this selection.")
 
     sources = [
         release.citation,

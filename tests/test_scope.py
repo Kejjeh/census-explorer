@@ -218,6 +218,29 @@ class SelectionScopeTests(_Built):
         self.assertNotIn("boroughs", ctx["contents"])
 
 
+class BriefCoverageTests(_Built):
+    """A brief says what its own map leaves out, not what the build does."""
+
+    def limitations(self, **kw):
+        from census_explorer import questions
+        sel = self.select("tract", **kw)
+        return server.brief_context(self.state, sel, questions.WHO_LIVES_HERE)["limitations"]
+
+    def test_a_city_brief_does_not_claim_the_state_s_missing_boundaries(self):
+        # The fixture's one tract without a polygon is in Erie County.
+        lines = self.limitations()
+        self.assertFalse(any("selected areas have no published boundary" in l for l in lines))
+        build = next(l for l in lines if l.startswith("Across the whole build"))
+        self.assertIn("0 of them are in this selection", build)
+        self.assertNotIn(".0)", build)
+
+    def test_a_county_brief_counts_its_own(self):
+        lines = self.limitations(scope="county:36029")
+        self.assertIn(f"1 of the {len(ERIE_TRACTS)} selected areas have no published boundary",
+                      " ".join(lines))
+        self.assertIn("1 of them is in this selection", " ".join(lines))
+
+
 class ReferenceTests(_Built):
     def test_the_state_reference_is_the_state_s_own_row(self):
         values = self.state.values("testrel", "foreign_born_population")

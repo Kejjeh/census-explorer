@@ -67,6 +67,8 @@ function decodeSharedView(hash, context) {
   return validateSharedView(view, context);
 }
 function publishedBrief({dataset, measure, areas, values, quality, benchmark, snapshot, compare = [], coverage = [], scopeLabel = ''}) {
+  // One full stop at the end of a sentence, whether or not the note already had one.
+  const sentence = t => { const x = String(t ?? '').trim(); return x ? (/[.!?]$/.test(x) ? x : x + '.') : ''; };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
   const names = Object.fromEntries(dataset.areas.map(a => [a.geoid, a.name]));
   const number = n => Number.isFinite(n) ? n.toLocaleString('en-US', {maximumFractionDigits: measure.unit === 'percent' ? 1 : 0, minimumFractionDigits: measure.unit === 'percent' ? 1 : 0}) : 'unavailable';
@@ -80,7 +82,7 @@ function publishedBrief({dataset, measure, areas, values, quality, benchmark, sn
   const shown = [...areas].sort().slice(0, 25);
   const b = benchmark;
   const reference = !b ? 'No reference selected.' : !b.available ? `${b.label}: unavailable — ${b.unavailable_reason || 'no usable reference'}` :
-    `${b.label}: ${estimate({es: b.estimate_status || (b.estimate == null ? 'unavailable' : 'ok'), e: b.estimate, er: b.estimate_reason})}; ${uncertainty({es:'ok', ctl:b.controlled, ms:b.moe_status, m:b.moe, mr:b.moe_reason})}. ${b.basis || ''}`;
+    `${b.label}: ${estimate({es: b.estimate_status || (b.estimate == null ? 'unavailable' : 'ok'), e: b.estimate, er: b.estimate_reason})}; ${sentence(uncertainty({es:'ok', ctl:b.controlled, ms:b.moe_status, m:b.moe, mr:b.moe_reason}))} ${b.basis ? sentence(b.basis.charAt(0).toUpperCase() + b.basis.slice(1)) : ''}`;
   const release = dataset.release;
   const notes = [...Object.values(quality || {}).flatMap(q => q.lines || []), ...coverage];
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(measure.label)} — Census Explorer brief</title><style>
@@ -89,7 +91,7 @@ body{font:15px/1.5 system-ui,sans-serif;color:#172c40;max-width:1050px;margin:40
 <p class="screen">Use your browser’s Print command to print this brief or save it as PDF.</p>
 ${dataset.data_mode !== 'live' ? '<p class="notice">FIXTURE DATA — synthetic test values, not census findings.</p>' : ''}
 <p class="notice">Generated from the published snapshot, not a saved project. This document does not re-check raw inputs. ${scopeLabel ? 'View: ' + esc(scopeLabel) + '. ' : ''}${areas.length} selected ${areas.length === 1 ? 'place' : 'places'}; ${shown.length === areas.length ? 'all are listed below' : 'the first 25 in GEOID order are listed below; download CSV for all selected places'}. No combined estimate is implied.</p>
-<h2>Definition and denominator</h2><p>${esc(measure.definition_note)}</p><p>Universe: ${esc(measure.universe_note)}. ${measure.unit === 'percent' ? 'Denominator: ' + esc(measure.out_of || measure.universe_note) : 'This is a count, not a percentage.'}</p>
+<h2>Definition and denominator</h2><p>${esc(measure.definition_note)}</p><p>Universe: ${esc(sentence(measure.universe_note))} ${measure.unit === 'percent' ? 'Denominator: ' + esc(sentence(measure.out_of || measure.universe_note)) : 'This is a count, not a percentage.'}</p>
 <h2>Selected places</h2>${table(shown)}
 ${compare.length ? '<h2>Places chosen for side-by-side comparison</h2><p>These inspection choices do not change the selected scope above' + (compare.some(g => !areas.includes(g)) ? ', and ' + compare.filter(g => !areas.includes(g)).length + ' of them lie outside it' : '') + '.</p>' + table(compare) : ''}
 <h2>Reference and limits</h2><p>${esc(reference)}</p><p>Differences between estimates are not tested for statistical significance. Read both margins of error. Missing uncertainty is unavailable, not zero. This period estimate does not describe any single year.</p><ul>${notes.map(n => '<li>' + esc(n) + '</li>').join('')}</ul>
