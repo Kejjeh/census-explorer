@@ -72,9 +72,9 @@ UNSUPPORTED = {
     "selected_benchmark": ("A reference built from the places you selected has "
                            "to be recomputed from the underlying counts for "
                            "each combination, which needs the local service. "
-                           "New York City is available here because it is one "
-                           "fixed set of five boroughs, computed during the "
-                           "build."),
+                           "New York City, New York State and each county are "
+                           "available here because each is one fixed set of "
+                           "areas, computed during the build."),
 }
 
 
@@ -605,7 +605,10 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
         "join_reports": dataset.get("join_reports", []),
         "unsupported_here": UNSUPPORTED,
         "contents": ("Official published American Community Survey aggregates "
-                     "for New York City, the Census Bureau's own cartographic "
+                     + ("for every county and census tract in New York State, "
+                        "with New York City as its documented five-borough "
+                        "subset, " if statewide else "for New York City, ")
+                     + "the Census Bureau's own cartographic "
                      "boundary files for the matching vintage, and this "
                      "project's wording about them. No raw retrieval cache, no "
                      "saved view, no credential and no local path is included."),

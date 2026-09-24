@@ -353,7 +353,10 @@ function intervalChartSvg(model, opts) {
   const fmtV = o.format || ((v) => String(v));
   const fmtM = o.formatMoe || ((m) => `±${m}`);
   const id = o.id || 'cmp-chart';
-  const W = 360; const left = 12; const right = 12; const rowH = 52; const top = 8;
+  // Side margins leave room for the end tick labels, which are centred on
+  // their ticks and would otherwise be cut off (a lost minus sign reads as a
+  // different number).
+  const W = 360; const left = 28; const right = 28; const rowH = 52; const top = 8;
   const axisY = top + model.rows.length * rowH + 6;
   const H = axisY + 34;
   const [d0, d1] = model.domain;
@@ -394,7 +397,7 @@ function intervalChartSvg(model, opts) {
     else if (r.state === 'no_moe') caption = `${r.label} — ${fmtV(r.e)}, margin of error unavailable`;
     else caption = `${r.label} — ${fmtV(r.e)} (${fmtM(r.m)})`;
     parts.push(`<g class="ic-row" data-state="${r.state}" data-key="${svgEscape(r.key)}">`);
-    parts.push(`<text class="ic-label" x="${left}" y="${y0 + 16}">${svgEscape(caption)}</text>`);
+    parts.push(`<text class="ic-label" x="4" y="${y0 + 16}">${svgEscape(caption)}</text>`);
     if (r.state === 'interval') {
       parts.push(`<line class="ic-interval" x1="${x(r.lo).toFixed(1)}" x2="${x(r.hi).toFixed(1)}" ` +
         `y1="${cy}" y2="${cy}"/>`);
@@ -408,7 +411,7 @@ function intervalChartSvg(model, opts) {
     } else if (r.state === 'no_moe') {
       parts.push(`<circle class="ic-point ic-hollow" cx="${x(r.e).toFixed(1)}" cy="${cy}" r="5"/>`);
     } else {
-      parts.push(`<text class="ic-missing" x="${left}" y="${cy + 4}">not drawn: ` +
+      parts.push(`<text class="ic-missing" x="4" y="${cy + 4}">not drawn: ` +
         `${svgEscape(r.reason)}</text>`);
     }
     parts.push('</g>');

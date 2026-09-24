@@ -19,6 +19,37 @@ test('shared links reject changed snapshots and incompatible or malformed select
   assert.throws(() => decodeSharedView('#view=%ZZ',context), /damaged/);
   assert.throws(() => decodeSharedView('#view='+ 'x'.repeat(12001),context), /too long/);
 });
+// A scoped build: two New York City counties stand in for the five, plus Erie.
+const scoped = {snapshot:'snap', release:'acs', catalog:{boroughs:['36005','36047'], statewide:true,
+  levels:{county:{groups:[{measures:[{measure_id:'share'}]}]}, tract:{groups:[{measures:[{measure_id:'share'}]}]}}},
+  areas:[{geoid:'36005',level:'county'},{geoid:'36047',level:'county'},{geoid:'36029',level:'county'},
+    {geoid:'36005000100',level:'tract'},{geoid:'36047000100',level:'tract'},{geoid:'36029016600',level:'tract'},{geoid:'36029990000',level:'tract'}]};
+const v2 = {v:2, snapshot:'snap', release:'acs', level:'tract', scope:'county:36029', measure:'share', areas:[], benchmark:'containing_county', pick:'36005000100', compare:['36047000100','36029016600']};
+const hashOf = (view) => '#view=' + encodeURIComponent(JSON.stringify(view));
+test('a scoped link restores its county, and may inspect places outside it', () => {
+  assert.deepEqual(decodeSharedView(encodeSharedView(v2, scoped), scoped), v2);
+  assert.deepEqual(decodeSharedView(hashOf({...v2, scope:'nys', benchmark:'nys'}), scoped).scope, 'nys');
+});
+test('a link made before scopes is the city, never the state', () => {
+  const v1 = {v:1, snapshot:'snap', release:'acs', level:'tract', measure:'share', areas:['36005000100'], benchmark:'nyc', pick:'36029016600', compare:[]};
+  assert.deepEqual(decodeSharedView(hashOf(v1), scoped), v1);
+  // An Erie tract was never in a version 1 view, so it cannot be named as one.
+  assert.throws(() => decodeSharedView(hashOf({...v1, areas:['36029016600']}), scoped), /out-of-scope/);
+  // The whole city spans several counties, so it has no single containing county.
+  assert.throws(() => decodeSharedView(hashOf({...v1, areas:[], benchmark:'containing_county'}), scoped), /not supported/);
+  assert.equal(decodeSharedView(hashOf({...v1, benchmark:'containing_county'}), scoped).benchmark, 'containing_county');
+});
+test('a scoped link cannot list places outside its scope or ask for an impossible reference', () => {
+  for (const change of [{areas:['36005000100']}, {scope:'county:36999'}, {scope:'county:36029', level:'county', measure:'share'},
+    {scope:'borough:36005'}, {scope:'nys', benchmark:'containing_county'}, {scope:undefined}]) {
+    const view = {...v2, ...change};
+    if (change.scope === undefined && 'scope' in change) delete view.scope;
+    assert.throws(() => decodeSharedView(hashOf(view), scoped), /Shared view/, JSON.stringify(change));
+  }
+  const narrow = {...scoped, catalog:{...scoped.catalog, statewide:false}};
+  assert.throws(() => decodeSharedView(hashOf({...v2, scope:'nys', benchmark:'none'}), narrow), /cannot be shown/);
+  assert.throws(() => decodeSharedView(hashOf({...v2, scope:'nyc', benchmark:'nys', areas:[], compare:[], pick:null}), narrow), /not supported/);
+});
 const input = {dataset:{data_mode:'live', release:{period_label:'2019–2023 ACS', citation:'Census Bureau'}, areas:[{geoid:'001',name:'Bronx <script>alert(1)</script>'}]}, measure:{label:'Naturalized share',unit:'percent',out_of:'foreign-born people', tables:['B05002'], numerator_cells:['N'],denominator_cells:['D']}, areas:['001'],values:{'001':{e:53.7,es:'ok',m:0.8,ms:'ok',n:537,d:1000}}, quality:{comparison:{lines:['Within one period.']}}, benchmark:null,snapshot:'snapshot-a'};
 test('brief keeps denominator, percentage-point MOE, scope and escaped source content', () => {
   const html=publishedBrief(input);

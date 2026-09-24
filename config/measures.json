@@ -35,7 +35,7 @@
       "definition_note": "Residents who were not U.S. citizens at birth.",
       "caveats": [
         "People born in Puerto Rico and other U.S. island areas are native-born, not foreign-born, and are counted in B05002 'Native; born outside the United States'.",
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "nativity",
@@ -59,7 +59,7 @@
       "definition_note": "Foreign-born residents as a percentage of all residents.",
       "caveats": [
         "People born in Puerto Rico and other U.S. island areas are native-born, not foreign-born, and are counted in B05002 'Native; born outside the United States'.",
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "nativity",
@@ -166,7 +166,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Dominican Republic who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -189,7 +189,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Dominican Republic as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -211,7 +211,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in China (including Hong Kong and Taiwan) who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "The published category 'China:' includes China excluding Hong Kong and Taiwan, Hong Kong, and Taiwan. Do not relabel it 'mainland China'."
       ],
       "topics": [
@@ -235,7 +235,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in China (including Hong Kong and Taiwan) as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
         "The published category 'China:' includes China excluding Hong Kong and Taiwan, Hong Kong, and Taiwan. Do not relabel it 'mainland China'."
       ],
@@ -258,7 +258,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Mexico who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -281,7 +281,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Mexico as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -303,7 +303,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Jamaica who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -326,7 +326,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Jamaica as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -348,7 +348,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Ecuador who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -371,7 +371,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Ecuador as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -393,7 +393,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Guyana who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -416,7 +416,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Guyana as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -438,7 +438,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Bangladesh who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -461,7 +461,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Bangladesh as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -483,7 +483,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in India who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -506,7 +506,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in India as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -528,7 +528,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Haiti who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -551,7 +551,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Haiti as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -573,7 +573,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Italy who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "birthplace",
@@ -596,7 +596,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Italy as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
       ],
       "topics": [
@@ -618,7 +618,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Poland who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Birthplace is recorded against present-day country names. Borders in this part of Europe changed during the lifetimes of many respondents."
       ],
       "topics": [
@@ -642,7 +642,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Poland as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
         "Birthplace is recorded against present-day country names. Borders in this part of Europe changed during the lifetimes of many respondents."
       ],
@@ -665,7 +665,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in the Caribbean who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "A regional subtotal. Overlaps the individual Caribbean countries listed separately."
       ],
       "topics": [
@@ -689,7 +689,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in the Caribbean as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
         "A regional subtotal. Overlaps the individual Caribbean countries listed separately."
       ],
@@ -712,7 +712,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Europe who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "A continental subtotal; overlaps the countries listed separately."
       ],
       "topics": [
@@ -736,7 +736,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Europe as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
         "A continental subtotal; overlaps the countries listed separately."
       ],
@@ -759,7 +759,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Asia who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "A continental subtotal; overlaps the countries listed separately."
       ],
       "topics": [
@@ -783,7 +783,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Asia as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
         "A continental subtotal; overlaps the countries listed separately."
       ],
@@ -806,7 +806,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Africa who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "A continental subtotal; overlaps the countries listed separately."
       ],
       "topics": [
@@ -830,7 +830,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Africa as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
         "A continental subtotal; overlaps the countries listed separately."
       ],
@@ -853,7 +853,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Latin America who were not U.S. citizens at birth.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "A regional subtotal; overlaps the Caribbean, Central American and South American entries."
       ],
       "topics": [
@@ -877,7 +877,7 @@
       "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
       "definition_note": "Residents born in Latin America as a percentage of the foreign-born population in the same table and universe.",
       "caveats": [
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
         "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
         "A regional subtotal; overlaps the Caribbean, Central American and South American entries."
       ],
@@ -1038,7 +1038,7 @@
       "definition_note": "Foreign-born residents as a percentage of the Black alone population.",
       "caveats": [
         "This table crosses place of birth with race only at the broadest birthplace level. It cannot identify Caribbean-born Black residents; that intersection is not published in B05006 or B06004B.",
-        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to New York City."
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
       ],
       "topics": [
         "race",

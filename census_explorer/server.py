@@ -1560,6 +1560,8 @@ class Handler(BaseHTTPRequestHandler):
             areas = one("areas")
             if areas:
                 payload["areas"] = [a for a in areas.split(",") if a]
+            if one("scope"):
+                payload["scope"] = one("scope")
             sel = build_selection(st, payload)
             svg = build_figure_for(st, sel, one("kind", "map"))
             return self._send(200, svg.encode("utf-8"), "image/svg+xml; charset=utf-8")

@@ -60,11 +60,20 @@
       <button type="button" class="btn starters-toggle" id="btn-starters"
               aria-controls="starters" aria-expanded="false">Start from a question</button>
 
+      <div class="region-switch" id="region-switch" role="radiogroup"
+           aria-label="Area covered" hidden>
+        <button type="button" role="radio" data-region="nyc" aria-checked="true">New York City</button>
+        <button type="button" role="radio" data-region="nys" aria-checked="false">New York State</button>
+      </div>
       <div class="level-switch" role="radiogroup" aria-label="Geography">
         <button type="button" role="radio" data-level="county" aria-checked="true">Boroughs</button>
         <button type="button" role="radio" data-level="tract" aria-checked="false">Census tracts</button>
       </div>
       <p class="level-note" id="level-note"></p>
+      <label class="field county-field" id="county-field" hidden>
+        <span id="county-label">Census tracts in</span>
+        <select id="county-select"></select>
+      </label>
 
       <label class="field search-field">
         <span class="visually-hidden">Search topics and measures</span>
@@ -93,7 +102,7 @@
         <label class="field search-field">
           <span class="visually-hidden">Find a place by name or identifier</span>
           <input type="search" id="place-search" autocomplete="off"
-                 placeholder="Find a borough or tract…"
+                 placeholder="Find a county, borough or tract…"
                  role="combobox" aria-expanded="false" aria-autocomplete="list"
                  aria-controls="place-results">
         </label>
@@ -112,7 +121,7 @@
       <p class="muted tiny" id="starters-outro"></p>
     </section>
 
-    <div id="scope-bar" class="scope-bar" aria-live="polite"></div>
+    <div id="scope-bar" class="scope-bar" aria-live="polite" tabindex="-1"></div>
 
     <section id="export-result" class="export-result" aria-live="polite" hidden>
       <div class="export-head">
@@ -158,6 +167,7 @@
         </table>
       </div>
       <p id="table-empty" class="empty-state" hidden></p>
+      <nav id="table-pager" class="table-pager" aria-label="Table pages"></nav>
     </div>
   </section>
 

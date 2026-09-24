@@ -13,8 +13,12 @@ const state = {
   dataset: null,
   catalog: null,          // /api/catalog, both levels
   level: 'county',
+  //: What the map, table, search listing, CSV, brief and share link cover:
+  //: 'nyc', 'nys' or 'county:<GEOID>'. New York City unless a reader or a
+  //: link chooses otherwise; see scope.py.
+  scope: SCOPE_DEFAULT,
   measureId: null,
-  areas: [],              // [] means every area at this level
+  areas: [],              // [] means every area in the scope
   values: null,
   geo: null,
   quality: null,
@@ -25,6 +29,9 @@ const state = {
   benchmark: null,
   cuts: [],
   sort: { key: 'estimate', dir: 'desc' },
+  //: The table's page. Every row is on some page; nothing is cut off.
+  page: 0,
+  pageSize: 50,
   pick: null,             // the inspected area
   compare: [],            // up to two geoids, deliberately chosen
   hover: null,
@@ -70,7 +77,7 @@ function rampColour(i) {
   if (state.breaks.classes === 1) return RAMP[2];
   return RAMP[Math.min(i, RAMP.length - 1)];
 }
-const MAX_TABLE_ROWS = 400;
+const PAGE_SIZES = [25, 50, 100];
 //: Pointer travel, in map units, past which a gesture is a pan rather than a
 //: click. Small enough that a deliberate click on a tract still selects it.
 const DRAG_SLOP = 4;
@@ -199,20 +206,67 @@ function currentMeasure() {
   return measures().find((m) => m.measure_id === state.measureId) || null;
 }
 
+/** Area records by GEOID. A statewide build has thousands; a linear search per
+ *  table row would make every re-render quadratic. */
+function areaIndex() {
+  if (!areaIndex._map || areaIndex._for !== state.dataset) {
+    areaIndex._map = new Map(state.dataset.areas.map((a) => [a.geoid, a]));
+    areaIndex._for = state.dataset;
+  }
+  return areaIndex._map;
+}
+
 function areaName(geoid) {
-  const a = state.dataset.areas.find((x) => x.geoid === geoid);
+  const a = areaIndex().get(geoid);
   return a ? a.name : geoid;
 }
 
-function levelNoun(n) {
-  const word = state.level === 'county' ? 'borough' : 'census tract';
-  return n === 1 ? word : `${word}s`;
+/** The region a scope sits in: a county scope takes its county's. */
+function regionOf(code) {
+  const s = parseScope(code);
+  if (s.kind !== 'county') return s.kind;
+  return (state.catalog.boroughs || []).includes(s.county) ? 'nyc' : 'nys';
+}
+
+function regionInfo(code) {
+  const region = regionOf(code || state.scope);
+  return (state.catalog.regions || []).find((r) => r.scope === region) || null;
+}
+
+/** Counties are boroughs only inside New York City. */
+function levelNoun(n, level) {
+  const lv = level || state.level;
+  const word = lv === 'county'
+    ? (regionOf(state.scope) === 'nyc' ? 'borough' : 'county')
+    : 'census tract';
+  if (n === 1) return word;
+  return word === 'county' ? 'counties' : `${word}s`;
+}
+
+/** Every GEOID the current scope covers at this level, before any narrowing. */
+function scopeGeoids(code, level) {
+  return resolveScope(parseScope(code || state.scope), level || state.level,
+    state.dataset.areas, state.catalog.boroughs || [], Boolean(state.catalog.statewide));
 }
 
 function scopedGeoids() {
   if (state.selectionJson) return state.selectionJson.areas;
   if (state.areas.length) return state.areas;
-  return state.dataset.areas.filter((a) => a.level === state.level).map((a) => a.geoid);
+  return scopeGeoids();
+}
+
+/** The scope in words, with its size, as the service says it. */
+function scopeLabel() {
+  if (state.selectionJson && state.selectionJson.scope_label) {
+    return state.selectionJson.scope_label;
+  }
+  const s = parseScope(state.scope);
+  let name = null;
+  if (s.county) {
+    name = areaName(s.county);
+    if ((state.catalog.boroughs || []).includes(s.county)) name += ', a New York City borough';
+  }
+  return describeScope(s, state.level, scopeGeoids().length, name, false);
 }
 
 /**
@@ -227,6 +281,7 @@ function currentRequest() {
     releaseId: state.releaseId,
     measureId: state.measureId,
     level: state.level,
+    scope: state.scope,
     areas: [...state.areas],
     benchmarkId: state.benchmarkId,
   };
@@ -239,7 +294,7 @@ function areaParamFor(req) {
 function selectionQueryFor(req) {
   return `release=${encodeURIComponent(req.releaseId)}` +
     `&measure=${encodeURIComponent(req.measureId)}` +
-    `&level=${req.level}${areaParamFor(req)}`;
+    `&level=${req.level}&scope=${encodeURIComponent(req.scope)}${areaParamFor(req)}`;
 }
 
 function selectionQuery() { return selectionQueryFor(currentRequest()); }
@@ -291,6 +346,8 @@ async function boot() {
       linkProblem = e.message.replace(/^Shared view:\s*/, '');
     }
     if (shared) {
+      // A version 1 link predates scopes and meant New York City.
+      state.scope = shared.v === 1 ? SCOPE_DEFAULT : shared.scope;
       state.level = shared.level; state.measureId = shared.measure;
       state.areas = [...shared.areas]; state.benchmarkId = shared.benchmark;
       state.pick = shared.pick; state.compare = [...shared.compare];
@@ -381,6 +438,13 @@ function wireControls() {
   document.querySelectorAll('.level-switch button').forEach((b) => {
     b.addEventListener('click', () => setLevel(b.dataset.level));
   });
+  $('region-switch').querySelectorAll('button').forEach((b) => {
+    b.addEventListener('click', () => setScope(b.dataset.region));
+  });
+  $('county-select').addEventListener('change', (e) => {
+    const county = e.target.value;
+    setScope(county ? `county:${county}` : regionOf(state.scope));
+  });
   $('measure-search').addEventListener('input', (e) => {
     state.measureFilter = e.target.value.trim().toLowerCase();
     renderSidebar();
@@ -430,20 +494,102 @@ function wireControls() {
 /* ------------------------------------------------------------ level + sidebar */
 
 function renderLevelSwitch() {
+  const region = regionInfo();
   document.querySelectorAll('.level-switch button').forEach((b) => {
     const on = b.dataset.level === state.level;
     b.setAttribute('aria-checked', String(on));
     const info = state.catalog.levels[b.dataset.level];
     b.disabled = !info;
+    const named = region && region.level_labels[b.dataset.level];
+    if (named) b.textContent = named.label;
   });
   const info = levelInfo();
+  const named = region && region.level_labels[state.level];
+  const count = region ? region.counts[state.level] : info.area_count;
   $('level-note').textContent =
-    `${info.area_count.toLocaleString('en-US')} ${info.label.toLowerCase()} — ${info.note}.`;
+    `${count.toLocaleString('en-US')} ${(named ? named.label : info.label).toLowerCase()} — ` +
+    `${named ? named.note : info.note}.`;
+  renderScopeControl();
+}
+
+/**
+ * The area control: New York City or the state, and at tract level one
+ * county's tracts. Offered only for what the build covers: a build without
+ * the state shows no state option at all.
+ */
+function renderScopeControl() {
+  const regions = state.catalog.regions || [];
+  const regionHost = $('region-switch');
+  const current = regionOf(state.scope);
+  regionHost.hidden = regions.length < 2;
+  regionHost.querySelectorAll('button').forEach((b) => {
+    const r = regions.find((x) => x.scope === b.dataset.region);
+    b.hidden = !r;
+    b.setAttribute('aria-checked', String(b.dataset.region === current));
+  });
+  const field = $('county-field');
+  const select = $('county-select');
+  field.hidden = state.level !== 'tract';
+  if (field.hidden) return;
+  const region = regionInfo();
+  const boroughs = new Set(state.catalog.boroughs || []);
+  const counties = (state.catalog.counties || [])
+    .filter((c) => (current === 'nyc' ? boroughs.has(c.geoid) : true));
+  select.textContent = '';
+  const all = region ? region.counts.tract : 0;
+  select.add(new Option(`All of ${region ? region.label : 'the build'} ` +
+    `(${all.toLocaleString('en-US')} census tracts)`, ''));
+  counties.forEach((c) => {
+    select.add(new Option(`${c.name}${c.borough ? ' (borough)' : ''} — ` +
+      `${c.tract_count.toLocaleString('en-US')} census tract${c.tract_count === 1 ? '' : 's'}`,
+    c.geoid));
+  });
+  const s = parseScope(state.scope);
+  select.value = s.kind === 'county' ? s.county : '';
+  $('county-label').textContent = current === 'nyc'
+    ? 'Census tracts in the city, or in one borough' : 'Census tracts in the state, or in one county';
+}
+
+/**
+ * Change what the view covers. Narrowing to named places is undone, because
+ * those places may not be in the new scope; the inspected place and the
+ * comparison stay, and are labelled if they fall outside it.
+ */
+async function setScope(code) {
+  const s = parseScope(code);
+  if (s.code === state.scope && !state.areas.length) return;
+  state.scope = s.code;
+  state.areas = [];
+  state.page = 0;
+  state.placeQuery = '';
+  $('place-search').value = '';
+  closePlaceResults();
+  dismissShare();
+  fitMap();
+  renderLevelSwitch();
+  await loadBenchmarks();
+  await refresh();
+}
+
+/** Open one county's census tracts, from anywhere. */
+async function exploreCounty(county) {
+  state.level = 'tract';
+  if (!measures().some((m) => m.measure_id === state.measureId)) {
+    state.measureId = measures()[0]?.measure_id || null;
+  }
+  renderSidebar();
+  await setScope(`county:${county}`);
 }
 
 async function setLevel(level) {
   if (level === state.level || !state.catalog.levels[level]) return;
   state.level = level;
+  // One county's tracts has no county-level equivalent other than the
+  // region it sits in; it never silently becomes the state.
+  if (level === 'county' && parseScope(state.scope).kind === 'county') {
+    state.scope = regionOf(state.scope);
+  }
+  state.page = 0;
   // A place chosen at one level does not exist at another, and neither does a
   // comparison built from it.
   state.areas = [];
@@ -561,25 +707,40 @@ function wireMeasureListKeys() {
 async function chooseMeasure(measureId) {
   if (measureId === state.measureId) return;
   state.measureId = measureId;
+  state.page = 0;
   renderSidebar();
   await refresh();
 }
 
 /* ----------------------------------------------------------- place search */
 
+const MAX_PLACE_HITS = 12;
+
+/**
+ * Places whose name or GEOID matches, across the whole build rather than only
+ * the current view, so a tract that is not on screen can still be found.
+ * Matches inside the view come first. At tract level a matching county is
+ * offered too, as a way to open its tracts. The number of matches is always
+ * reported, so a list cut to a readable length never passes for all of them.
+ */
 function placeMatches(query) {
   const q = query.trim().toLowerCase();
-  if (!q) return [];
-  return state.dataset.areas
-    .filter((a) => a.level === state.level)
+  if (!q) return { hits: [], total: 0 };
+  const inView = new Set(scopedGeoids());
+  const found = state.dataset.areas
+    .filter((a) => a.level === state.level || (state.level === 'tract' && a.level === 'county'))
     .filter((a) => a.name.toLowerCase().includes(q) || a.geoid.includes(q))
-    .slice(0, 12);
+    .map((a) => ({ ...a, inView: inView.has(a.geoid), action: a.level !== state.level }));
+  found.sort((a, b) => (Number(b.action) - Number(a.action))
+    || (Number(b.inView) - Number(a.inView)) || a.geoid.localeCompare(b.geoid));
+  return { hits: found.slice(0, MAX_PLACE_HITS), total: found.length };
 }
 
 function wirePlaceSearch() {
   const input = $('place-search');
   input.addEventListener('input', () => {
     state.placeQuery = input.value;
+    state.page = 0;
     renderPlaceResults();
     renderTable();
   });
@@ -614,15 +775,19 @@ function renderPlaceResults() {
   host.textContent = '';
   if (!q) { closePlaceResults(); return; }
 
-  const hits = placeMatches(q);
+  const { hits, total } = placeMatches(q);
   if (!hits.length) {
     // A search that finds nothing must say what this build can and cannot
     // find, rather than leaving a blank box.
     const li = document.createElement('li');
     li.className = 'no-match';
-    li.innerHTML = `No ${levelNoun(2)} match “${esc(q)}”. This build carries the ` +
-      'five New York City boroughs and their census tracts by published name ' +
-      'and GEOID. It has no address search and no neighbourhood boundaries.';
+    const covers = state.catalog.statewide
+      ? 'every county in New York State and its census tracts'
+      : 'the five New York City boroughs and their census tracts';
+    li.innerHTML = `No ${levelNoun(2)} match “${esc(q)}”. This build carries ` +
+      `${esc(covers)} by published name and GEOID. Cities, towns and ` +
+      'neighbourhoods are not geographies here, and there is no address search: ' +
+      'search for the county or the census tract number instead.';
     host.appendChild(li);
   } else {
     hits.forEach((a) => {
@@ -630,17 +795,37 @@ function renderPlaceResults() {
       const b = document.createElement('button');
       b.type = 'button';
       b.setAttribute('role', 'option');
-      b.innerHTML = `${esc(a.name)} <span class="r-id">${esc(a.geoid)}</span>`;
-      b.addEventListener('click', () => {
-        selectArea(a.geoid, { focus: true });
-        input.value = '';
-        state.placeQuery = '';
-        closePlaceResults();
-        renderTable();
-      });
+      if (a.action) {
+        const county = (state.catalog.counties || []).find((c) => c.geoid === a.geoid);
+        const n = county ? county.tract_count : 0;
+        b.innerHTML = `${esc(a.name)} <span class="r-id">${esc(a.geoid)}</span>` +
+          `<span class="r-where">county · show its ${esc(n.toLocaleString('en-US'))} census tracts</span>`;
+        b.addEventListener('click', () => {
+          input.value = '';
+          state.placeQuery = '';
+          closePlaceResults();
+          exploreCounty(a.geoid);
+        });
+      } else {
+        b.innerHTML = `${esc(a.name)} <span class="r-id">${esc(a.geoid)}</span>` +
+          (a.inView ? '' : '<span class="r-where">outside this view</span>');
+        b.addEventListener('click', () => {
+          input.value = '';
+          state.placeQuery = '';
+          closePlaceResults();
+          selectArea(a.geoid, { focus: true, reveal: true });
+        });
+      }
       li.appendChild(b);
       host.appendChild(li);
     });
+    if (total > hits.length) {
+      const li = document.createElement('li');
+      li.className = 'no-match';
+      li.textContent = `Showing ${hits.length} of ${total.toLocaleString('en-US')} ` +
+        'matches. Type more of the name, or a GEOID, to narrow them.';
+      host.appendChild(li);
+    }
   }
   host.hidden = false;
   input.setAttribute('aria-expanded', 'true');
@@ -652,8 +837,13 @@ async function loadBenchmarks() {
   const req = currentRequest();
   await benchGate.run(
     () => api(`/api/benchmarks?release=${encodeURIComponent(req.releaseId)}` +
-      `&level=${req.level}${areaParamFor(req)}`),
+      `&level=${req.level}&scope=${encodeURIComponent(req.scope)}${areaParamFor(req)}`),
     {
+      // Every change of scope, level or places passes through here before its
+      // data loads. From this moment the controls describe a selection the
+      // screen does not show yet, so sharing, the brief and the CSV wait:
+      // otherwise a link could carry the new scope with the old rows.
+      start: () => { state.ready = false; updateActions(); },
       commit: (res) => {
         state.benchmarks = res.benchmarks;
         const sel = $('benchmark-select');
@@ -746,6 +936,7 @@ function clearCurrentView() {
   $('source-details').textContent = '';
   $('drawer-body').textContent = '';
   $('scope-bar').textContent = '';
+  $('table-pager').textContent = '';
   updateActions();
 }
 
@@ -785,6 +976,7 @@ async function refresh() {
       state.ready = true;
       $('blocked').hidden = true;
       document.body.classList.remove('stale');
+      if (state.pick) revealRow(state.pick);
       computeBreaks();
       render();
     },
@@ -899,8 +1091,8 @@ function coverageNote() {
     datasetUnmatched: report.unmatched_observation_count || 0,
     datasetTotal: report.observations_total || 0,
     unmatchedInView: scoped.filter((g) => unmatchedSet.has(g)).length,
-    noun: state.level === 'county' ? 'borough' : 'census tract',
-    nounPlural: state.level === 'county' ? 'boroughs' : 'census tracts',
+    noun: levelNoun(1),
+    nounPlural: levelNoun(2),
     vintage: state.dataset.release.boundary_release,
   });
 }
@@ -984,6 +1176,9 @@ function toggleStarters(force) {
 
 async function openStarter(starter) {
   if (state.loading) return;
+  // The worked examples are New York City examples.
+  state.scope = SCOPE_DEFAULT;
+  state.page = 0;
   state.level = starter.level;
   state.measureId = starter.measure_id;
   state.areas = [...starter.areas];
@@ -1018,30 +1213,50 @@ function renderScopeBar() {
   const host = $('scope-bar');
   host.textContent = '';
   const n = scopedGeoids().length;
-  const total = levelInfo().area_count;
+  const label = scopeLabel();
   const text = document.createElement('span');
   text.className = 'scope-text';
   // The public brief explicitly caps its printed table at 25 rows.
   const covers = STATIC
-    ? 'The CSV covers exactly these; the brief lists up to 25.'
-    : 'Exports and the brief cover exactly these.';
-  text.textContent = state.areas.length
-    ? `Showing ${n} of ${total.toLocaleString('en-US')} ${levelNoun(total)}: ` +
-      `${state.areas.map(areaName).join(', ')}. ${covers}`
-    : `Showing all ${n.toLocaleString('en-US')} ${levelNoun(n)}. ${covers}`;
+    ? 'The map, table and CSV cover exactly these; the brief lists up to 25.'
+    : 'The map, table, exports and the brief cover exactly these.';
+  const missing = scopedGeoids().filter((g) => !(state.values?.[g]?.es === 'ok')).length;
+  const gaps = missing
+    ? ` ${missing.toLocaleString('en-US')} of them ${missing === 1 ? 'has' : 'have'} no usable estimate for this measure.`
+    : '';
+  const shown = state.areas.slice(0, 3).map(areaName).join(', ') +
+    (state.areas.length > 3 ? ` and ${state.areas.length - 3} more` : '');
+  text.innerHTML = state.areas.length
+    ? `<strong>Showing ${esc(n.toLocaleString('en-US'))} of ${esc(label)}</strong>: ` +
+      `${esc(shown)}.${esc(gaps)} ${esc(covers)}`
+    : `<strong>Showing ${esc(label)}.</strong>${esc(gaps)} ${esc(covers)}`;
   host.appendChild(text);
   if (state.areas.length) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'btn ghost';
-    b.textContent = `Show all ${levelNoun(2)}`;
+    b.textContent = `Show all ${levelNoun(2)} in this view`;
     b.addEventListener('click', () => setAreas([]));
     host.appendChild(b);
+  }
+  if (state.scope !== SCOPE_DEFAULT || state.areas.length) {
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'btn';
+    reset.id = 'scope-reset';
+    reset.textContent = 'Reset to New York City';
+    reset.addEventListener('click', async () => {
+      state.areas = [];
+      await setScope(SCOPE_DEFAULT);
+      $('scope-bar').focus();
+    });
+    host.appendChild(reset);
   }
 }
 
 async function setAreas(areas) {
   state.areas = areas;
+  state.page = 0;
   await loadBenchmarks();
   await refresh();
 }
@@ -1449,6 +1664,9 @@ function renderTable() {
         key: c.key,
         dir: state.sort.key === c.key && state.sort.dir === 'desc' ? 'asc' : 'desc',
       };
+      // A new order starts on the page holding the inspected place, or the first.
+      state.page = 0;
+      if (state.pick) revealRow(state.pick);
       renderTable();
     });
     th.appendChild(b);
@@ -1461,18 +1679,23 @@ function renderTable() {
   if (state.benchmark) body.appendChild(referenceRow(m));
 
   const rows = rowsForTable();
-  const shown = rows.slice(0, MAX_TABLE_ROWS);
+  const win = pageWindow(rows.length, state.pageSize, state.page);
+  state.page = win.page;
+  const shown = rows.slice(win.start, win.end);
+  // One tab stop for the whole table, not one per row: arrows move between
+  // rows, Page Up and Page Down between pages. The stop sits on the inspected
+  // row when it is on this page, otherwise on the first row.
+  const stop = shown.some((r) => r.geoid === state.pick) ? state.pick
+    : (shown[0] && shown[0].geoid);
   shown.forEach((row) => {
     const tr2 = document.createElement('tr');
-    tr2.tabIndex = 0;
+    tr2.tabIndex = row.geoid === stop ? 0 : -1;
     tr2.dataset.geoid = row.geoid;
     if (state.pick === row.geoid) tr2.dataset.pick = 'true';
     tr2.addEventListener('click', () => selectArea(row.geoid));
     tr2.addEventListener('focus', () => setHover(row.geoid));
     tr2.addEventListener('blur', () => setHover(null));
-    tr2.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectArea(row.geoid); }
-    });
+    tr2.addEventListener('keydown', (e) => tableKey(e, row.geoid));
     COLUMNS.forEach((c) => {
       const td = document.createElement('td');
       if (c.num) td.className = 'num';
@@ -1497,20 +1720,118 @@ function renderTable() {
   const missing = rows.filter((r) => r.estimate === null).length;
   $('table-note').textContent =
     `Values are ${m.unit === 'percent' ? `percentages of ${m.out_of}` : 'counts of people'}. ` +
-    `${missing} area${missing === 1 ? '' : 's'} here have no usable estimate and read ` +
-    '“no data”, never zero; sorting keeps them at the end.' +
-    (rows.length > shown.length
-      ? ` Listing the first ${shown.length}; search by name or GEOID to reach the rest, and the export contains all.`
-      : '');
+    `${missing.toLocaleString('en-US')} of these ${rows.length.toLocaleString('en-US')} ` +
+    `${levelNoun(rows.length)} ${missing === 1 ? 'has' : 'have'} no usable estimate and ` +
+    'read “no data”, never zero; sorting keeps them at the end. Every row is on ' +
+    'one of the pages below, and the CSV contains all of them.';
+  renderPager(win);
   const emptyEl = $('table-empty');
   if (!rows.length) {
     emptyEl.hidden = false;
     emptyEl.textContent = filtering
-      ? `No ${levelNoun(2)} in view match “${state.placeQuery.trim()}”. Clear the search to see all ${total.toLocaleString('en-US')} ${levelNoun(total)} in view.`
+      ? `No ${levelNoun(2)} in view match “${state.placeQuery.trim()}”. Clear the search to see all ${total.toLocaleString('en-US')} ${levelNoun(total)} in view, or use the place search above the map to find one outside this view.`
       : 'No areas are in view.';
   } else {
     emptyEl.hidden = true;
   }
+}
+
+/** Page controls: plain buttons, a count, and a page-size choice. */
+function renderPager(win) {
+  const host = $('table-pager');
+  host.textContent = '';
+  if (!win.total) return;
+  const status = document.createElement('p');
+  status.className = 'pager-status';
+  status.id = 'pager-status';
+  status.textContent = `Rows ${(win.start + 1).toLocaleString('en-US')}–` +
+    `${win.end.toLocaleString('en-US')} of ${win.total.toLocaleString('en-US')} · ` +
+    `page ${win.page + 1} of ${win.pages}`;
+  const nav = document.createElement('div');
+  nav.className = 'pager-buttons';
+  [['First', 0], ['Previous', win.page - 1], ['Next', win.page + 1], ['Last', win.pages - 1]]
+    .forEach(([label, target]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn';
+      b.textContent = label;
+      b.setAttribute('aria-label', `${label} page`);
+      b.setAttribute('aria-describedby', 'pager-status');
+      b.disabled = target < 0 || target >= win.pages || target === win.page;
+      b.addEventListener('click', () => goToPage(target, { keepFocus: b }));
+      nav.appendChild(b);
+    });
+  const size = document.createElement('label');
+  size.className = 'pager-size';
+  size.textContent = 'Rows per page ';
+  const select = document.createElement('select');
+  PAGE_SIZES.forEach((n) => select.add(new Option(String(n), String(n))));
+  select.value = String(state.pageSize);
+  select.addEventListener('change', () => {
+    // Keep the first row now on screen on screen.
+    const first = win.start;
+    state.pageSize = Number(select.value);
+    state.page = pageOfIndex(first, state.pageSize);
+    renderTable();
+  });
+  size.appendChild(select);
+  host.append(status, nav, size);
+}
+
+function goToPage(page, opts = {}) {
+  state.page = page;
+  renderTable();
+  if (opts.focusRow) {
+    const rows = $('table-body').querySelectorAll('tr[data-geoid]');
+    const target = opts.focusRow === 'last' ? rows[rows.length - 1] : rows[0];
+    if (target) target.focus();
+  } else if (opts.keepFocus) {
+    // The pressed button may now be disabled; keep focus inside the pager.
+    const label = opts.keepFocus.textContent;
+    const same = [...$('table-pager').querySelectorAll('button')]
+      .find((b) => b.textContent === label && !b.disabled);
+    (same || $('table-pager').querySelector('button:not([disabled])') || $('data-table')).focus();
+  }
+}
+
+/** Keyboard movement inside the table, one tab stop for all of it. */
+function tableKey(e, geoid) {
+  const rows = [...$('table-body').querySelectorAll('tr[data-geoid]')];
+  const i = rows.findIndex((r) => r.dataset.geoid === geoid);
+  const move = (target) => {
+    if (!target) return;
+    rows.forEach((r) => { r.tabIndex = -1; });
+    target.tabIndex = 0;
+    target.focus();
+  };
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectArea(geoid); return; }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (i < rows.length - 1) move(rows[i + 1]);
+    else if (state.page < pageWindow(rowsForTable().length, state.pageSize, state.page).pages - 1) {
+      goToPage(state.page + 1, { focusRow: 'first' });
+    }
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (i > 0) move(rows[i - 1]);
+    else if (state.page > 0) goToPage(state.page - 1, { focusRow: 'last' });
+  } else if (e.key === 'Home') { e.preventDefault(); move(rows[0]); }
+  else if (e.key === 'End') { e.preventDefault(); move(rows[rows.length - 1]); }
+  else if (e.key === 'PageDown') {
+    e.preventDefault();
+    goToPage(state.page + 1, { focusRow: 'first' });
+  } else if (e.key === 'PageUp') {
+    e.preventDefault();
+    goToPage(Math.max(0, state.page - 1), { focusRow: 'first' });
+  }
+}
+
+/** Put the page holding `geoid` on screen, if it is in the table at all. */
+function revealRow(geoid) {
+  const index = rowsForTable().findIndex((r) => r.geoid === geoid);
+  if (index < 0) return false;
+  state.page = pageOfIndex(index, state.pageSize);
+  return true;
 }
 
 function referenceRow(m) {
@@ -1553,6 +1874,9 @@ function referenceRow(m) {
 function selectArea(geoid, opts = {}) {
   dismissShare();
   state.pick = geoid;
+  // Chosen from the search or a link: bring its row onto the table's page.
+  // Chosen from the table itself, the page it is on is already showing.
+  if (opts.reveal) revealRow(geoid);
   if (opts.focus) focusOnArea(geoid);
   markMapSelection();
   renderReadout();
@@ -1596,6 +1920,13 @@ function renderPlaceCard() {
   const v = state.values?.[geoid] || {};
   const parts = [];
   parts.push(`<p class="pc-name">${esc(areaName(geoid))}</p>`);
+  const outside = !scopedGeoids().includes(geoid);
+  if (outside) {
+    // Inspecting a place is not the same as putting it in the view: it is not
+    // on the map, in the table, in the CSV or in the brief, and says so.
+    parts.push(`<p class="pc-outside">Outside the current view (${esc(scopeLabel())}). ` +
+      'It is not on the map, in the table, in the CSV or in the brief.</p>');
+  }
   if (v.es === 'ok') {
     parts.push(`<p class="pc-value">${esc(fmt(v.e, m.unit))}</p>`);
     if (isControlled(v)) {
@@ -1628,13 +1959,41 @@ function renderPlaceCard() {
   add.addEventListener('click', () => (inCompare ? removeFromCompare(geoid) : addToCompare(geoid)));
   actions.appendChild(add);
 
-  const onlyThis = state.areas.length === 1 && state.areas[0] === geoid;
-  const limit = document.createElement('button');
-  limit.type = 'button';
-  limit.className = 'btn';
-  limit.textContent = onlyThis ? `Show all ${levelNoun(2)}` : 'Show only this place';
-  limit.addEventListener('click', () => setAreas(onlyThis ? [] : [geoid]));
-  actions.appendChild(limit);
+  if (outside) {
+    // Offer the view the place belongs to, never a silent widening.
+    const home = document.createElement('button');
+    home.type = 'button';
+    home.className = 'btn';
+    if (state.level === 'tract') {
+      const county = geoid.slice(0, 5);
+      home.textContent = `Show ${areaName(county)}'s census tracts`;
+      home.addEventListener('click', () => exploreCounty(county));
+    } else {
+      const region = regionOf(`county:${geoid}`);
+      const info = (state.catalog.regions || []).find((r) => r.scope === region);
+      home.textContent = `Show ${info ? info.label : 'its region'}`;
+      home.addEventListener('click', () => setScope(region));
+    }
+    actions.appendChild(home);
+  } else {
+    const onlyThis = state.areas.length === 1 && state.areas[0] === geoid;
+    const limit = document.createElement('button');
+    limit.type = 'button';
+    limit.className = 'btn';
+    limit.textContent = onlyThis ? `Show all ${levelNoun(2)}` : 'Show only this place';
+    limit.addEventListener('click', () => setAreas(onlyThis ? [] : [geoid]));
+    actions.appendChild(limit);
+  }
+  if (state.level === 'county') {
+    const tracts = (state.catalog.counties || []).find((c) => c.geoid === geoid);
+    const explore = document.createElement('button');
+    explore.type = 'button';
+    explore.className = 'btn';
+    explore.textContent = `Explore this ${tracts && tracts.borough ? 'borough' : 'county'}'s ` +
+      `${tracts ? tracts.tract_count.toLocaleString('en-US') + ' ' : ''}census tracts`;
+    explore.addEventListener('click', () => exploreCounty(geoid));
+    actions.appendChild(explore);
+  }
 
   const clear = document.createElement('button');
   clear.type = 'button';
@@ -1690,9 +2049,11 @@ function renderComparePanel() {
         : (v.ms === 'ok' ? `${fmtMoe(v.m, m.unit)} at 90% confidence`
           : 'margin of error unavailable'))
       : plainReason(v, 'e');
+    const outside = !scopedGeoids().includes(geoid)
+      ? '<div class="slot-outside">outside the current view</div>' : '';
     body.innerHTML = `<div class="slot-name">${esc(areaName(geoid))}</div>` +
       `<div class="slot-val">${esc(value)}</div>` +
-      `<div class="muted tiny">${esc(moe)}</div>`;
+      `<div class="muted tiny">${esc(moe)}</div>${outside}`;
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'btn ghost';
@@ -1702,6 +2063,8 @@ function renderComparePanel() {
     slot.append(body, rm);
     host.appendChild(slot);
   });
+
+  host.appendChild(compareChart(m));
 
   if (state.compare.length === 2) {
     const [a, b] = state.compare.map((g) => state.values?.[g] || {});
@@ -1750,6 +2113,51 @@ function renderComparePanel() {
     limit.append(both, clearBoth);
     host.appendChild(limit);
   }
+}
+
+/**
+ * The same places as the text above, on one shared axis, with their
+ * published 90% margins of error. Built from the values the text reads, so
+ * the two cannot describe different selections. It adds no statistic: no
+ * difference test, no rank, no recomputed margin.
+ */
+function compareChart(m) {
+  const rows = state.compare.map((g) => {
+    const v = state.values?.[g] || {};
+    return {
+      key: g, label: areaName(g), value: v,
+      reason: v.es === 'ok' ? `margin of error unavailable — ${plainReason(v, 'm')}`
+        : plainReason(v, 'e'),
+    };
+  });
+  const model = intervalChartModel({ unit: m.unit, rows });
+  const axis = m.unit === 'percent' ? `Percent of ${m.out_of}` : 'Number of people';
+  const fig = document.createElement('figure');
+  fig.className = 'compare-chart';
+  const names = rows.map((r) => r.label).join(' and ');
+  fig.innerHTML = intervalChartSvg(model, {
+    id: 'cmp-chart',
+    title: `${m.label}: ${names}, ${state.catalog.period_label}`,
+    desc: `Published estimates with their 90% margins of error on one axis ` +
+      `starting at zero. ${axis}. Not a test of statistical significance.`,
+    format: (v) => fmt(v, m.unit),
+    formatMoe: (x) => fmtMoe(x, m.unit),
+    axisLabel: axis,
+  });
+  const cap = document.createElement('figcaption');
+  cap.className = 'muted tiny';
+  const lines = [
+    `${axis}, ${state.catalog.period_label}. Dots are published estimates; each ` +
+    'line spans the published 90% margin of error. One axis for both, from ' +
+    `${fmt(model.domain[0], m.unit)} to ${fmt(model.domain[1], m.unit)}, always including zero.`,
+    'A hollow dot has no published margin of error (unavailable, not zero); a ' +
+    'diamond is a controlled total with no sampling error.',
+    'Whether the lines overlap is not a significance test, and this build runs none.',
+    ...model.notes,
+  ];
+  cap.textContent = lines.join(' ');
+  fig.appendChild(cap);
+  return fig;
 }
 
 function renderBenchmarkCard() {
@@ -1871,8 +2279,9 @@ function shareContext() {
 function shareView() {
   if (!state.ready || state.loading) return;
   try {
-    const hash = encodeSharedView({v: 1, snapshot: shareContext().snapshot,
-      release: state.releaseId, level: state.level, measure: state.measureId,
+    const hash = encodeSharedView({v: 2, snapshot: shareContext().snapshot,
+      release: state.releaseId, level: state.level, scope: state.scope,
+      measure: state.measureId,
       areas: [...state.areas], benchmark: state.benchmarkId,
       pick: state.pick, compare: [...state.compare]}, shareContext());
     const url = new URL(location.href); url.hash = hash;
@@ -1887,7 +2296,8 @@ function openPublishedBrief() {
   const full = state.dataset.measures.find(m => m.measure_id === state.measureId);
   const html = publishedBrief({dataset: state.dataset, measure: {...full, ...currentMeasure()},
     areas: scopedGeoids(), values: state.values, quality: state.quality,
-    benchmark: state.benchmark, snapshot: shareContext().snapshot, compare: [...state.compare], coverage: coverageNote()});
+    benchmark: state.benchmark, snapshot: shareContext().snapshot, compare: [...state.compare], coverage: coverageNote(),
+    scopeLabel: scopeLabel()});
   const url = URL.createObjectURL(new Blob([html], {type: 'text/html;charset=utf-8'}));
   window.open(url, '_blank', 'noopener');
   setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -1925,7 +2335,7 @@ function downloadCsv() {
     release: state.dataset.release, measure, areas,
     areaNames: names, areaLevels: levels, values: state.values,
   });
-  const name = `${state.measureId}-${state.level}-${state.releaseId}.csv`;
+  const name = `${state.measureId}-${state.level}-${state.scope.replace(':', '')}-${state.releaseId}.csv`;
   const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a');
   link.href = url;
@@ -1938,7 +2348,7 @@ function downloadCsv() {
   $('export-title').textContent = 'Data downloaded';
   $('export-what').textContent =
     `${measure.label} — ${areas.length.toLocaleString('en-US')} ` +
-    `${levelNoun(areas.length)}, ${state.catalog.period_label}, saved as ${name}. ` +
+    `${levelNoun(areas.length)} (${scopeLabel()}), ${state.catalog.period_label}, saved as ${name}. ` +
     'One row per area, with the margin of error, the denominator and the ' +
     'published cell codes, exactly as the local app exports them.';
   $('export-files').textContent = '';
@@ -1957,6 +2367,7 @@ async function doExport() {
       release_id: state.releaseId,
       measure_id: state.measureId,
       level: state.level,
+      scope: state.scope,
       areas,
       question_id: state.questionId,
       benchmark_id: state.benchmarkId,
@@ -2034,6 +2445,7 @@ async function saveProject(event) {
       release_id: state.releaseId,
       measure_id: state.measureId,
       level: state.level,
+      scope: state.scope,
       areas: scopedGeoids(),
       question_id: state.questionId,
       benchmark_id: state.benchmarkId,
@@ -2102,6 +2514,9 @@ async function reopen(projectId) {
   const brief = replay.brief || {};
   state.releaseId = p.release_id;
   state.level = p.level;
+  // Saved before scopes existed: no scope was recorded, and it meant the city.
+  state.scope = ((p.snapshot || {}).definitions || {}).scope || SCOPE_DEFAULT;
+  state.page = 0;
   state.measureId = p.measure_id;
   state.areas = p.areas || [];
   state.benchmarkId = brief.benchmark_id || 'none';

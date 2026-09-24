@@ -1,22 +1,54 @@
 /* Pure presentation helpers for the published snapshot; no survey arithmetic. */
 'use strict';
+// The scope rules live in core.js, loaded first by the page; under Node the
+// tests load this file on its own.
+const SHARE_SCOPE_RULES = (typeof module === 'object' && module.exports)
+  ? require('./core.js') : { parseScope, resolveScope };
+/* Version 1 links predate scopes and always meant New York City. Version 2
+ * carries the scope. Neither may name a place in its view that is outside
+ * that scope; the inspected place and the comparison may lie outside it and
+ * the page labels them when they do. */
+const SHARE_KEYS = {
+  1: ['v', 'snapshot', 'release', 'level', 'measure', 'areas', 'benchmark', 'pick', 'compare'],
+  2: ['v', 'snapshot', 'release', 'level', 'scope', 'measure', 'areas', 'benchmark', 'pick', 'compare'],
+};
 function validateSharedView(view, context) {
   const fail = (message) => { throw new Error(`Shared view: ${message}`); };
   if (!view || typeof view !== 'object' || Array.isArray(view)) fail('invalid link.');
-  const keys = ['v', 'snapshot', 'release', 'level', 'measure', 'areas', 'benchmark', 'pick', 'compare'];
+  const keys = SHARE_KEYS[view.v];
+  if (!keys) fail('unsupported link version.');
   if (Object.keys(view).some(k => !keys.includes(k)) || keys.some(k => !(k in view))) fail('unsupported link format.');
-  if (view.v !== 1) fail('unsupported link version.');
   if (view.snapshot !== context.snapshot) fail('it was made from a different published snapshot of the data.');
   if (view.release !== context.release) fail('this release is not available here.');
   const level = context.catalog.levels[view.level];
   if (!level || !level.groups) fail('unknown geography level.');
   if (!level.groups.flatMap(g => g.measures).some(m => m.measure_id === view.measure)) fail('unknown measure for this level.');
   const ids = new Set(context.areas.filter(a => a.level === view.level).map(a => a.geoid));
-  const validList = (list, max) => Array.isArray(list) && list.length <= max &&
-    new Set(list).size === list.length && list.every(g => typeof g === 'string' && ids.has(g));
-  if (!validList(view.areas, ids.size) || !validList(view.compare, 2)) fail('unknown, duplicate, or incompatible places.');
+  // A build that predates scopes has no borough list: its whole level is the view.
+  let inScope = ids;
+  let scope = null;
+  if (Array.isArray(context.catalog.boroughs)) {
+    if (view.v === 2 && typeof view.scope !== 'string') fail('unknown scope.');
+    try {
+      scope = SHARE_SCOPE_RULES.parseScope(view.v === 1 ? 'nyc' : view.scope);
+      inScope = new Set(SHARE_SCOPE_RULES.resolveScope(scope, view.level, context.areas,
+        context.catalog.boroughs, Boolean(context.catalog.statewide)));
+    } catch (e) { fail(`this scope cannot be shown here (${e.message}).`); }
+  } else if (view.v === 2 && view.scope !== 'nyc') {
+    fail('this copy has no scopes other than New York City.');
+  }
+  const validList = (list, max, allowed) => Array.isArray(list) && list.length <= max &&
+    new Set(list).size === list.length && list.every(g => typeof g === 'string' && allowed.has(g));
+  if (!validList(view.areas, inScope.size, inScope)) fail('unknown, duplicate, or out-of-scope places.');
+  if (!validList(view.compare, 2, ids)) fail('unknown, duplicate, or incompatible places.');
   if (view.pick !== null && !ids.has(view.pick)) fail('unknown inspected place.');
-  if (!['none', 'nyc'].includes(view.benchmark)) fail('this reference is not supported on the published site.');
+  const references = ['none', 'nyc'];
+  if (context.catalog.statewide) references.push('nys');
+  if (view.level === 'tract' && scope) {
+    const counties = new Set((view.areas.length ? view.areas : [...inScope]).map(g => g.slice(0, 5)));
+    if (scope.kind === 'county' || counties.size === 1) references.push('containing_county', 'containing_borough');
+  }
+  if (!references.includes(view.benchmark)) fail('this reference is not supported on the published site.');
   return view;
 }
 function encodeSharedView(view, context) {
@@ -34,7 +66,7 @@ function decodeSharedView(hash, context) {
   catch (_) { throw new Error('Shared view: the link is incomplete or damaged.'); }
   return validateSharedView(view, context);
 }
-function publishedBrief({dataset, measure, areas, values, quality, benchmark, snapshot, compare = [], coverage = []}) {
+function publishedBrief({dataset, measure, areas, values, quality, benchmark, snapshot, compare = [], coverage = [], scopeLabel = ''}) {
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
   const names = Object.fromEntries(dataset.areas.map(a => [a.geoid, a.name]));
   const number = n => Number.isFinite(n) ? n.toLocaleString('en-US', {maximumFractionDigits: measure.unit === 'percent' ? 1 : 0, minimumFractionDigits: measure.unit === 'percent' ? 1 : 0}) : 'unavailable';
@@ -56,10 +88,10 @@ body{font:15px/1.5 system-ui,sans-serif;color:#172c40;max-width:1050px;margin:40
 </style></head><body><p>CENSUS EXPLORER · PLACE BRIEF</p><h1>${esc(measure.label)}</h1><p>${esc(release.period_label)} · ${esc(release.product_label)}</p>
 <p class="screen">Use your browser’s Print command to print this brief or save it as PDF.</p>
 ${dataset.data_mode !== 'live' ? '<p class="notice">FIXTURE DATA — synthetic test values, not census findings.</p>' : ''}
-<p class="notice">Generated from the published snapshot, not a saved project. This document does not re-check raw inputs. ${areas.length} selected ${areas.length === 1 ? 'place' : 'places'}; ${shown.length === areas.length ? 'all are listed below' : 'the first 25 in GEOID order are listed below; download CSV for all selected places'}. No combined estimate is implied.</p>
+<p class="notice">Generated from the published snapshot, not a saved project. This document does not re-check raw inputs. ${scopeLabel ? 'View: ' + esc(scopeLabel) + '. ' : ''}${areas.length} selected ${areas.length === 1 ? 'place' : 'places'}; ${shown.length === areas.length ? 'all are listed below' : 'the first 25 in GEOID order are listed below; download CSV for all selected places'}. No combined estimate is implied.</p>
 <h2>Definition and denominator</h2><p>${esc(measure.definition_note)}</p><p>Universe: ${esc(measure.universe_note)}. ${measure.unit === 'percent' ? 'Denominator: ' + esc(measure.out_of || measure.universe_note) : 'This is a count, not a percentage.'}</p>
 <h2>Selected places</h2>${table(shown)}
-${compare.length ? '<h2>Places chosen for side-by-side comparison</h2><p>These inspection choices do not change the selected scope above.</p>' + table(compare) : ''}
+${compare.length ? '<h2>Places chosen for side-by-side comparison</h2><p>These inspection choices do not change the selected scope above' + (compare.some(g => !areas.includes(g)) ? ', and ' + compare.filter(g => !areas.includes(g)).length + ' of them lie outside it' : '') + '.</p>' + table(compare) : ''}
 <h2>Reference and limits</h2><p>${esc(reference)}</p><p>Differences between estimates are not tested for statistical significance. Read both margins of error. Missing uncertainty is unavailable, not zero. This period estimate does not describe any single year.</p><ul>${notes.map(n => '<li>' + esc(n) + '</li>').join('')}</ul>
 <h2>Sources and reproducibility</h2><p>${esc(release.citation)}</p><p>Geography: ${esc(release.geography_vintage)}. Tables: ${esc((measure.tables || []).join(', '))}.</p><p>Numerator cells: ${esc((measure.numerator_cells || []).join(' + ') || 'not applicable')}. Denominator cells: ${esc((measure.denominator_cells || []).join(' + ') || 'not applicable')}.</p><p>Published snapshot: <code>${esc(snapshot)}</code></p><p>Release: ${esc(release.release_id)}. Data built: ${esc(dataset.built_at)}. Data manifest: ${esc(dataset.manifest_id)}.</p></body></html>`;
 }
