@@ -27,7 +27,7 @@ one, and what is still open. Written to be checked, not to reassure.
 
 | | State |
 | --- | --- |
-| Offline test suite | 445 Python tests, 3 skips on Linux (live network); more on Windows. Node: 38 page-logic tests |
+| Offline test suite | 461 Python tests, 3 skips on Linux (live network), also passing with every text-mode write forced to CRLF as an imitation of Windows; more skips on Windows. Node: 40 page-logic tests. Results on Windows itself are recorded by the independent reviewer, not here |
 | Data | Official ACS 2019-2023 five-year aggregates for every county and census tract in New York State, built from a recorded manifest; New York City is its documented five-borough subset and the default view |
 | Retrieval sources | Table-based Summary File tables B01003, B05002, B05006, B06004B, B06009 (`acsdt5y2023-*.dat`), the release's geography file `Geos20235YR.txt`, and GENZ2023 cartographic boundaries `cb_2023_36_tract_500k.zip` and `cb_2023_us_county_500k.zip`. Keyless; every artifact has a manifest record with the digest of the complete upstream file |
 | Coverage | Release roster: 1 state, 62 counties, 5,411 tracts. Table rows: 1, 62, 5,396. Boundaries: 62 counties, 5,395 tracts. 15 listed tracts have no table row (14 in Suffolk, 1 in Ulster) and are shown as unavailable; 16 water tracts (population 0) have rows but no polygon and are listed by GEOID. 0 boundary features without observations. Each tract's county agrees with the boundary file's STATEFP and COUNTYFP (5,395 of 5,395) |
