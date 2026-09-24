@@ -16,10 +16,13 @@ the build. The page reshapes, counts and draws.
 | --- | --- | --- |
 | Map, zoom, pan, fit, click and keyboard selection | Yes | Yes |
 | Topic sidebar, measure search, Shares/Counts filter | Yes, all 47 measures | Yes |
-| Place search by name or GEOID, borough and tract | Yes | Yes |
+| Scope: New York City, New York State, one county's census tracts | Yes | Yes |
+| Place search by name or GEOID, county, borough and tract, across the build | Yes | Yes |
+| Paged table reaching every row | Yes | Yes |
+| Two-place comparison chart with published 90% intervals | Yes | Yes |
 | Inspector: estimate, margin of error, numerator, denominator, reliability | Yes | Yes |
 | Comparing two places inside one release | Yes | Yes |
-| New York City reference | Yes, precomputed during the build | Yes |
+| New York City, New York State and containing-county references | Yes, precomputed during the build (one per county) | Yes |
 | Reference built from the places you selected | **No** — listed and disabled, with the reason | Yes |
 | Uncertainty, comparison and period panels | Yes | Yes |
 | Coverage reporting and source details | Yes | Yes |

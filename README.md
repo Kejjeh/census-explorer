@@ -6,8 +6,10 @@ understand, check and reuse.**
 A local, offline-first tool for official census data. Pick one of three
 starting questions, pick the place, pick what to show, and get a print-ready
 brief with the definitions, the denominators, the margins of error and the
-sources attached — plus the CSV and the provenance bundle behind it. New York
-City is the first project; the data engine is independent of it.
+sources attached — plus the CSV and the provenance bundle behind it. The
+2019-2023 ACS build covers every county and census tract in New York State;
+New York City is its documented five-borough subset and the default view.
+The data engine is independent of either.
 
 Who it is aimed at, and whether anyone would pay for it, are **hypotheses**.
 See [docs/PRODUCT_DIRECTION.md](docs/PRODUCT_DIRECTION.md).
@@ -19,22 +21,26 @@ no telemetry, and the local service holds no credentials.
 
 | Capability | State |
 | --- | --- |
-| Topic sidebar over every measure the build carries, grouped by published concept | Working; 47 measures at borough and tract level |
+| Topic sidebar over every measure the build carries, grouped by published concept | Working; 47 measures at county and tract level |
+| Scope: New York City, New York State, or one county's census tracts | Working; the same scope drives the map, table, search listing, CSV, brief and share link. A view with no scope (every older link and saved view) is New York City |
+| Every place reachable | Working; the table pages through every row (5,411 tracts statewide), search looks across the whole build and labels places outside the view |
+| Two-place comparison chart | Working; one axis from zero, published 90% intervals, missing and controlled uncertainty drawn distinctly, no significance claim |
 | Plain-language selection summary: what is counted, out of what | Working |
 | Compatible benchmark built by adding underlying counts | Working; a named composite is refused unless its whole documented membership is present |
 | Quality as three separate statements, no combined score | Working |
 | Print-ready brief from the same validated selection | Working |
-| ACS retrieval for the five boroughs and all NYC census tracts | Working, 2019-2023 and 2018-2022 ACS five-year |
+| ACS retrieval for every New York State county and census tract | Working for 2019-2023 ACS five-year. The 2018-2022 release is still its earlier New York City-only build |
+| Coverage proved against the release's own geography roster | Working; 1 state, 62 counties and 5,411 tracts listed; 15 listed tracts have no table row and are shown as unavailable with that reason |
 | Exact cells, labels and universes resolved from official release metadata | Working; no code is written from memory |
 | Immutable raw cache, checksums, retrieval timestamps, manifests | Working; `verify manifests` re-hashes every artifact |
-| Reconciliation against an independently published official row | Working; 6/6 cells match exactly in both releases |
-| Matching-vintage Census polygons, string GEOIDs, join accounting | Working; boroughs and 2,324 tracts |
+| Reconciliation against an independently published official row | Working; the five boroughs match the published New York City row (6/6 cells, both releases) and the 62 counties add up exactly to the published state row (6/6 cells, 2019-2023) |
+| Matching-vintage Census polygons, string GEOIDs, join accounting | Working; 62 counties and 5,395 tracts matched; 16 tracts (all water, population 0) have estimates but no polygon and are listed by GEOID; every tract's county checked against the boundary file's own STATEFP/COUNTYFP |
 | Local browser app: map workspace, topic sidebar, place search, inspect and compare panel, sortable table | Working |
 | Saved projects, CSV + provenance export, SVG figure export | Working |
 | Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
 | Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
 | Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
-| Offline test suite | Working: 381 tests, no network |
+| Offline test suite | Working: 445 Python tests plus the Node tests of the page logic, no network |
 | Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
 | Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, with shareable views and printable briefs; saved projects and export bundles still require the local app. See `docs/DEPLOY.md` |
 | Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
@@ -87,10 +93,16 @@ python3 -m census_explorer.cli build --release acs5_2023
 python3 -m census_explorer.cli serve
 ```
 
-`fetch` streams roughly 440 MB per release from the Census Bureau and keeps only
-the rows for the requested geographies (about 3.5 MB), recording the digest of
-the complete upstream file so the download can be re-verified. It takes well
-under a minute on a reasonable connection.
+`fetch all` streams the five table files (about 435 MB for 2019-2023) and the
+release's geography roster (about 92 MB) from the Census Bureau and keeps only
+New York State's rows (5,459 per table; 5,474 roster rows), recording the digest
+of each complete upstream file so the download can be re-verified. The
+statewide cache is written beside, never over, an earlier New York City-only
+one. Then `reconcile --state` checks that the counties add up to the state:
+
+```bash
+python3 -m census_explorer.cli reconcile --state --release acs5_2023
+```
 
 ### No data yet? Run fixture mode
 
@@ -150,7 +162,8 @@ still need the local service. See
 | `fetch metadata` | yes | Official table metadata (no key required) |
 | `fetch geography` | yes | Cartographic boundary files of the matching vintage |
 | `fetch observations` | yes | ACS estimates and margins of error |
-| `fetch all` | yes | All three, in order |
+| `fetch roster` | yes | The release's own list of the state, county and tract geographies it publishes |
+| `fetch all` | yes | All of the above, in order |
 | `reference refresh` | yes | Re-archive the official annotation-value documentation |
 | `reconcile --fetch` | yes | Retrieve the published New York City row and compare it with the borough sum |
 | `smoke` | yes | A deliberately small live request, run on its own |
@@ -160,6 +173,7 @@ still need the local service. See
 | `catalog list \| show` | no | Search the catalog; show a measure's exact cells |
 | `compare --a --b --measure` | no | Report whether two releases may be compared, and why not |
 | `reconcile` | no | Re-run the comparison from the cache |
+| `reconcile --state` | no | Add every county's published row and compare with the published state row |
 | `export` | no | Write a CSV + provenance + figure bundle to `artifacts/` |
 | `project list \| show \| verify \| delete` | no | Saved project definitions and their pinned inputs |
 | `fixtures build` | no | Build the synthetic fixture dataset |
@@ -173,7 +187,7 @@ start-up.
 ## Verify the build
 
 ```powershell
-python -m unittest discover -s tests -t .          # 280 offline tests
+python -m unittest discover -s tests -t .          # 445 offline tests
 python -m census_explorer.cli verify manifests     # re-hash the raw cache
 python -m census_explorer.cli verify catalog       # cells vs the published release
 python -m census_explorer.cli reconcile --release acs5_2023
@@ -252,8 +266,19 @@ one rather than failing.
   inside one reference period, and the panel states the arithmetic difference
   next to both margins of error. It does not test significance and says so.
 - **A search that finds nothing says what this build can find.** There is no
-  address search and no neighbourhood geography here; the empty result says
-  that rather than leaving a blank box.
+  address search and no neighbourhood geography here, and a city such as
+  Buffalo is not a geography in this build; the empty result says that
+  rather than leaving a blank box. A search that finds more than it lists
+  says how many it found.
+- **Counties are boroughs only in New York City.** Outside the five boroughs
+  a county keeps its official name, "Erie County", and is never named after
+  a city in it. The New York City reference is always exactly its five
+  counties, whatever else is in view; the New York State reference is the
+  state's own published row, never a sum or an average of county figures.
+- **Scope and inspection are different things.** The scope is what the map,
+  table, CSV, brief and link cover. A place found by search or kept in the
+  comparison may lie outside it; it is then labelled as outside the view,
+  and nothing silently widens the scope to include it.
 - **Only the newest load may change what is on screen.** Controls are faster
   than the service, so several loads can be in flight at once. An older
   response, success or failure, is dropped rather than committed, and saving
@@ -319,8 +344,12 @@ artifacts/           git-ignored: export bundles
 
 ## Limitations, stated plainly
 
-- Only NYC counties and tracts, and only the two ACS five-year releases listed
-  in `config/project.json`, have been retrieved and validated.
+- Only New York State, and only the two ACS five-year releases listed in
+  `config/project.json`, have been retrieved and validated. Statewide coverage
+  is for 2019-2023 only; the 2018-2022 release remains the earlier New York
+  City build, so a state or upstate view cannot be set against it, and
+  rebuilding it now would first retrieve it statewide (`fetch all --release
+  acs5_2022`).
 - **Comparing two reference periods is blocked at every level.** Equivalence
   across boundary vintages requires documented provider correspondence or a
   scoped review, and this repository ships neither. Measuring the published
@@ -334,8 +363,8 @@ artifacts/           git-ignored: export bundles
   are on the roadmap, not in this build.
 - The measure catalog is 47 measures across five tables. It is not a
   500,000-variable library and does not attempt platform parity.
-- The map uses local boundary layers and a simple equirectangular projection
-  suitable for one city. There is no basemap, no tile pipeline and no
+- The map uses local boundary layers and a simple equirectangular projection,
+  adequate for one state at this scale. There is no basemap, no tile pipeline and no
   ring/drive-time analysis.
 - No historical microdata, no IPUMS or NHGIS extract, no generation analysis, no
   migration flows and no pre-2018 series exist in this repository. The eight

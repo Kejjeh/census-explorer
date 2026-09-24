@@ -34,9 +34,25 @@ Retrieving all for 2019-2023 ACS (acs5_2023)
 done. Next: python -m census_explorer.cli build --release acs5_2023
 ```
 
-2,332 rows is five boroughs plus 2,327 census tracts. Roughly 435 MB is
-streamed; about 3.4 MB is retained, plus the digest of each complete upstream
-file.
+2,332 rows is five boroughs plus 2,327 census tracts: that was the New York
+City-only retrieval, and its cache and manifest are kept. With the statewide
+study area in `config/project.json` (`explorer.study_area`, coverage `state`),
+the same command keeps New York State's rows instead, in a separate file
+(`<table>_state36.psv`), and also retrieves the release's own geography roster:
+
+```text
+  statewide coverage: state 36, levels state, county, tract
+   B01003: kept 5459 rows from 18.3 MB upstream
+   ...
+  streaming the 2019-2023 ACS geography file for state 36 ...
+   geography roster: kept 5474 rows from 91.9 MB upstream
+```
+
+5,459 rows is the state row, 62 counties and 5,396 tracts with a published
+row. The roster (`Geos20235YR.txt`, from the release's documentation
+directory) lists 5,411 tracts: the build carries all of them, and the 15 with
+no table row are shown as unavailable with that reason rather than dropped.
+A table row the roster does not list stops the build.
 
 Add `--transport api` to use the keyed Census Data API instead. Without
 `CENSUS_API_KEY` the command stops with an explanation and a pointer to the
@@ -67,6 +83,19 @@ python -m census_explorer.cli reconcile --fetch --release acs5_2023
 The command exits non-zero on any mismatch. The same run against `acs5_2022`
 also reports 6/6.
 
+The statewide check adds every county's published row and compares the total
+with the published state row, and first confirms the county roster matches
+the release's own list, so a short roster cannot pass by summing fewer
+counties:
+
+```powershell
+python -m census_explorer.cli reconcile --state --release acs5_2023
+```
+
+For 2019-2023 all six cells match exactly across the 62 counties
+(for example B01003_001: 19,872,319; B05002_013: 4,499,147). The report is
+written to `data/processed/acs5_2023/reconciliation_state.json`.
+
 ## 3. Build (offline)
 
 ```powershell
@@ -85,6 +114,22 @@ The three unmatched tract observations are `36047990100`, `36081990100` and
 `36085990100`: water tracts with a published population of zero that the
 cartographic boundary files exclude. They are reported, not dropped.
 
+With the statewide study area now configured, the same build reports (live,
+2019-2023, 19.2 s on this machine):
+
+```
+  join: {"level": "county", "matched": 62, "unmatched_feature_count": 0, "unmatched_observation_count": 0}
+  join: {"level": "tract", "matched": 5395, "unmatched_feature_count": 0, "unmatched_observation_count": 16}
+```
+
+The 16 unmatched tract observations are the state's water tracts, each with a
+published population of zero: 36011990200, 36013990000, 36029990000,
+36047990100, 36055990000, 36059990100, 36059990200, 36059990301,
+36059990302, 36059990400, 36063990000, 36073990000, 36075990000,
+36081990100, 36085990100 and 36103990100. The New York City three are among
+them. Separately, 15 tracts the release lists have no table row at all and
+are carried as unavailable, with that reason, not dropped.
+
 ## 4. Run the application
 
 ```powershell
@@ -102,9 +147,14 @@ The service refuses to bind to anything but loopback and refuses requests whose
 
 In the browser, the journey is:
 
-1. **Choose the geography** with the Boroughs / Census tracts switch at the top
-   of the left sidebar. The note under it says how many areas that level has and
-   what they are — census tracts are statistical areas, not neighbourhoods.
+1. **Choose the area and the geography.** New York City / New York State
+   sets the area (shown only when the build covers the state); Boroughs (or
+   Counties) / Census tracts sets the level. At tract level a picker lists
+   each county, or each borough within the city, with its tract count. The
+   scope line above the map always names what the map, table, CSV, brief and
+   share link cover, with its size, and offers Reset to New York City. A
+   county's place card offers "Explore this county's census tracts".
+   Census tracts are statistical areas, not neighbourhoods.
 2. **Choose a topic.** The sidebar lists every measure this build carries at
    that level, grouped by the published concept (Population, Born in the U.S. or
    abroad, Citizenship, Birthplace of foreign-born residents, Education by place
@@ -114,20 +164,29 @@ In the browser, the journey is:
    `Fit` to reset. With the map focused, arrow keys pan, `+` and `−` zoom and `0`
    fits. Hovering or focusing an area shows its value and margin of error in the
    readout at the bottom left.
-4. **Find a place** with the search above the map — borough or tract, by
-   published name or by GEOID. There is no address search and no neighbourhood
-   geography in this build, and a search that matches nothing says so. The same
-   search filters the table below.
+4. **Find a place** with the search above the map — county, borough or
+   tract, by published name or by GEOID, anywhere in the build. A place
+   outside the current view is labelled so, and its card offers its own
+   county's view; at tract level a county appears as "show its N census
+   tracts". When more places match than are listed, the list says how many.
+   There is no address search, cities are not geographies here, and a search
+   that matches nothing says so. The same search filters the table below.
+   The table pages through every row (25, 50 or 100 at a time); arrow keys,
+   Home/End and Page Up/Page Down move through it with one tab stop.
 5. **Inspect a place** by clicking it on the map, clicking or pressing Enter on
    a table row, or picking it from the place search. The right-hand panel gives
    the estimate, the margin of error (or why there is none), the numerator, the
    denominator by name, the reliability wording and the GEOID.
-6. **Compare** by adding up to two places to the comparison. The panel states
-   the difference between the two published estimates and says, in the same
-   breath, that this build does not test whether that difference is
-   statistically significant.
-7. **Add a reference** — New York City built from the five boroughs' underlying
-   counts, or the selected places combined — or read why one is unavailable.
+6. **Compare** by adding up to two places to the comparison. A chart draws
+   both on one axis from zero with their published 90% margins of error; a
+   missing margin, a controlled total and a missing estimate are each drawn
+   distinctly. The panel states the difference between the two published
+   estimates and says, in the same breath, that this build does not test
+   whether that difference is statistically significant.
+7. **Add a reference** — New York City built from the five boroughs'
+   underlying counts, New York State as the state's own published row, the
+   containing county (or borough) when every tract in view sits in one, or
+   the selected places combined — or read why one is unavailable.
 8. **Scope the output.** "Show only this place" narrows the map, the table, the
    brief and the export together; the scope bar above the map always says what
    the export will cover.

@@ -33,7 +33,7 @@ python -m unittest discover -s tests -t .
 Expected:
 
 ```
-Ran 381 tests in 17.2s
+Ran 445 tests in 17.7s
 OK (skipped=3)
 ```
 
@@ -130,6 +130,22 @@ Building 2019-2023 ACS (acs5_2023) from the cache
 and `36085990100`: water tracts with a published population of zero, which the
 cartographic boundary files exclude. They are reported, not dropped. Any other
 unmatched identifier deserves investigation before you publish anything.
+
+With the statewide study area now configured, the same build reports (live,
+2019-2023, 19.2 s on this machine):
+
+```
+  join: {"level": "county", "matched": 62, "unmatched_feature_count": 0, "unmatched_observation_count": 0}
+  join: {"level": "tract", "matched": 5395, "unmatched_feature_count": 0, "unmatched_observation_count": 16}
+```
+
+The 16 unmatched tract observations are the state's water tracts, each with a
+published population of zero: 36011990200, 36013990000, 36029990000,
+36047990100, 36055990000, 36059990100, 36059990200, 36059990301,
+36059990302, 36059990400, 36063990000, 36073990000, 36075990000,
+36081990100, 36085990100 and 36103990100. The New York City three are among
+them. Separately, 15 tracts the release lists have no table row at all and
+are carried as unavailable, with that reason, not dropped.
 
 ---
 
