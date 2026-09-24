@@ -64,6 +64,14 @@
       "county",
       "tract"
     ],
+    "study_area": {
+      "id": "nys",
+      "label": "New York State",
+      "coverage": "state",
+      "state_fips": "36",
+      "cache_suffix": "state36",
+      "note": "The dataset covers every county and census tract in New York State, plus the published state row, which is used for reconciliation and as a state reference. New York City is not the study area: it is the documented five-county subset in composites.nyc, and first_project.modern_counties carries the borough names used for those five counties only. The county roster is not listed here; it is read from the official cartographic boundary file for the release's boundary vintage and checked against the published county rows."
+    },
     "releases": {
       "acs5_2023": {
         "provider": "US Census Bureau",

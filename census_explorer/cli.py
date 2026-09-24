@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("geography", "cartographic boundary files of the matching vintage"),
         ("observations", "ACS estimates and margins of error"),
         ("all", "metadata, geography and observations"),
+        ("roster", "the release's own list of the geographies it publishes"),
     ]:
         sp = fsub.add_parser(what, help=helptext)
         sp.add_argument("--release", default=None,
@@ -143,6 +144,8 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument("--fetch", action="store_true",
                     help="retrieve the published city rows first (network)")
     rc.add_argument("--tolerance", type=int, default=0)
+    rc.add_argument("--state", action="store_true",
+                    help="compare every county row with the published state row")
 
     # serve ---------------------------------------------------------------
     s = sub.add_parser("serve", help="run the local browser application")
@@ -208,6 +211,11 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
         if args.what in ("observations", "all"):
             pipeline.fetch_observations(root, cfg, release, args.levels,
                                         args.transport, log=log)
+        # The roster ships with the table-based Summary File, so "all" takes it
+        # only on that transport; asked for by name, it is always retrieved.
+        if args.what == "roster" or (
+                args.what == "all" and getattr(args, "transport", "") == "summary-file"):
+            pipeline.fetch_roster(root, cfg, release, log=log)
         log("done. Next: python -m census_explorer.cli build "
             f"--release {release.release_id}")
         return 0
@@ -396,9 +404,14 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
             tables = sorted({c.split("_")[0] for c, _ in reconcile_mod.RECONCILED_CELLS})
             reconcile_mod.fetch_place_rows(root, release, tables, manifest, log=log)
             pipeline.save_manifest(root, manifest)
-        report = reconcile_mod.run(root, cfg, release, args.tolerance)
+        if args.state:
+            report = reconcile_mod.run_state(root, cfg, release, args.tolerance)
+            name = "reconciliation_state.json"
+        else:
+            report = reconcile_mod.run(root, cfg, release, args.tolerance)
+            name = "reconciliation.json"
         log(json.dumps(report, indent=2))
-        out = root / "data/processed" / release.release_id / "reconciliation.json"
+        out = root / "data/processed" / release.release_id / name
         if out.parent.exists():
             provenance.write_json(out, report)
             log(f"written to {out.relative_to(root)}")

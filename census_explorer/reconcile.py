@@ -57,7 +57,10 @@ def run(repo_root: Path, config: ProjectConfig, release: Release,
     results = []
     for cell, label in RECONCILED_CELLS:
         table = cell.split("_")[0]
-        borough_path = repo_root / f"data/raw/acs/{release.release_id}/summary_file/{table}.psv"
+        # The rows the current build was made from, so the check is of what
+        # is being shown and not of an older, narrower retrieval.
+        from .dataset import summary_file_path
+        borough_path = summary_file_path(repo_root, release, table, config)
         place_path = repo_root / cache_rel_path(release, table)
         if not borough_path.exists() or not place_path.exists():
             results.append({
@@ -111,4 +114,95 @@ def run(repo_root: Path, config: ProjectConfig, release: Release,
         "matched": len([r for r in checked if r["status"] == "match"]),
         "results": results,
         "passed": bool(checked) and all(r["status"] == "match" for r in checked),
+    }
+
+
+# ---------------------------------------------------------------------------
+# County rows against the published state row
+# ---------------------------------------------------------------------------
+
+def run_state(repo_root: Path, config: ProjectConfig, release: Release,
+              tolerance: int = 0) -> dict:
+    """Compare the sum of every county row with the published state row.
+
+    Only additive count cells are checked: the same person weights produce a
+    county's count and the state's, so every county summed must give the
+    state exactly. A share, or a total over a narrower universe from another
+    table, is not additive in that sense and is not asked to be.
+
+    The county roster is not assumed: it is every county row in the
+    statewide cache, and the result records how many there were so a short
+    roster cannot pass by summing fewer counties against a full state.
+    """
+    from .dataset import roster_path, summary_file_path
+    from .retrieve.acs_summary_file import read_roster
+
+    fips = str(config.study_area["state_fips"])
+    state_geo_id = f"0400000US{fips}"
+    roster_counties: set[str] | None = None
+    rp = roster_path(repo_root, release, config)
+    if rp.exists():
+        roster_counties = {g for g, v in read_roster(rp).items()
+                           if v["level"] == "county"}
+
+    results = []
+    for cell, label in RECONCILED_CELLS:
+        table = cell.split("_")[0]
+        path = summary_file_path(repo_root, release, table, config)
+        if not path.exists():
+            results.append({"cell": cell, "label": label, "status": "not checked",
+                            "note": "the statewide cache is missing; run: fetch "
+                                    "observations"})
+            continue
+        rows = read_summary_file(path)
+        counties = sorted(g for g in rows
+                          if g.startswith(f"0500000US{fips}"))
+        roster_ok = roster_counties is None or set(counties) == roster_counties
+        total = 0.0
+        problems = []
+        for geo_id in counties:
+            value = classify(rows[geo_id].get(cell, (None, None))[0])
+            if not value.is_number:
+                problems.append(f"{geo_id[9:]}: {value.meaning or value.status}")
+                continue
+            total += value.value
+        published = classify(rows.get(state_geo_id, {}).get(cell, (None, None))[0])
+        entry = {"cell": cell, "label": label, "counties_summed": len(counties),
+                 "county_roster_matches_release": roster_ok}
+        if problems or not published.is_number or not roster_ok:
+            entry.update({
+                "status": "not comparable",
+                "county_sum": None if problems else total,
+                "published_state_value": published.value if published.is_number else None,
+                "note": ("; ".join(problems)
+                         or ("the county rows are not the release's county roster"
+                             if not roster_ok else "")
+                         or (published.meaning or "no published state value")),
+            })
+            results.append(entry)
+            continue
+        difference = total - published.value
+        entry.update({
+            "status": "match" if abs(difference) <= tolerance else "MISMATCH",
+            "county_sum": total,
+            "published_state_value": published.value,
+            "difference": difference,
+        })
+        results.append(entry)
+
+    checked = [r for r in results if r["status"] in ("match", "MISMATCH")]
+    return {
+        "release": release.to_json(),
+        "source": (
+            f"Every county row for state {fips} summed and compared with the "
+            f"separately published state row ({state_geo_id}) from the same "
+            "table and release. Additive count cells only."),
+        "tolerance": tolerance,
+        "county_roster_source": (rp.relative_to(repo_root).as_posix()
+                                 if rp.exists() else None),
+        "checked": len(checked),
+        "matched": len([r for r in checked if r["status"] == "match"]),
+        "results": results,
+        "passed": bool(checked) and len(checked) == len(RECONCILED_CELLS)
+                  and all(r["status"] == "match" for r in checked),
     }

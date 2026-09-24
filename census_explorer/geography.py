@@ -22,6 +22,7 @@ from . import shapefile
 from .config import Release
 
 GEOID_RE = re.compile(r"^\d+$")
+STATE_GEOID_LEN = 2
 COUNTY_GEOID_LEN = 5
 TRACT_GEOID_LEN = 11
 
@@ -405,11 +406,14 @@ def split_geo_id(geo_id: str) -> tuple[str, str]:
 
 
 def level_for_geoid(geoid: str) -> str:
+    if len(geoid) == STATE_GEOID_LEN:
+        return "state"
     if len(geoid) == COUNTY_GEOID_LEN:
         return "county"
     if len(geoid) == TRACT_GEOID_LEN:
         return "tract"
-    raise GeographyError(f"GEOID {geoid!r} is neither a county nor a tract identifier")
+    raise GeographyError(
+        f"GEOID {geoid!r} is not a state, county or tract identifier")
 
 
 def validate_geoid(geoid: Any, level: str | None = None) -> str:
@@ -420,7 +424,8 @@ def validate_geoid(geoid: Any, level: str | None = None) -> str:
         )
     if not GEOID_RE.match(geoid):
         raise GeographyError(f"GEOID {geoid!r} is not a digit string")
-    expected = {"county": COUNTY_GEOID_LEN, "tract": TRACT_GEOID_LEN}
+    expected = {"state": STATE_GEOID_LEN, "county": COUNTY_GEOID_LEN,
+                "tract": TRACT_GEOID_LEN}
     if level:
         if level not in expected:
             raise GeographyError(f"unsupported level {level!r}")
@@ -524,11 +529,23 @@ def build_geojson(zip_path: Path, level: str, keep_geoids: set[str],
     features = shapefile.read_zip(zip_path)
     out_features = []
     geoids: list[str] = []
+    membership_checked = 0
+    disagreements: list[str] = []
     for feat in features:
         geoid = _feature_geoid(feat.properties, level)
         if geoid is None or geoid not in keep_geoids:
             continue
         validate_geoid(geoid, level)
+        # A tract's county is read from its GEOID everywhere else in this
+        # project. The boundary file states it independently, in STATEFP and
+        # COUNTYFP, so the two are compared rather than one being assumed.
+        if level == "tract":
+            state_fp = feat.properties.get("STATEFP")
+            county_fp = feat.properties.get("COUNTYFP")
+            if state_fp and county_fp:
+                membership_checked += 1
+                if geoid[:5] != f"{state_fp}{county_fp}":
+                    disagreements.append(geoid)
         geometry = shapefile.round_geometry(feat.geometry)
         if geometry is None:
             continue
@@ -547,6 +564,12 @@ def build_geojson(zip_path: Path, level: str, keep_geoids: set[str],
         })
         geoids.append(geoid)
     check_unique(geoids, f"{level} boundary")
+    if disagreements:
+        raise GeographyError(
+            f"{len(disagreements)} tract(s) whose GEOID does not begin with the "
+            f"STATEFP and COUNTYFP the boundary file gives them: "
+            f"{', '.join(disagreements[:5])}. County membership cannot be "
+            "read from the GEOID for this file.")
     collection = {
         "type": "FeatureCollection",
         "metadata": {
@@ -558,6 +581,11 @@ def build_geojson(zip_path: Path, level: str, keep_geoids: set[str],
             "synthetic": False,
             "note": "Published boundary geometry. Generalized for cartography; "
                     "not a legal boundary description.",
+            "county_membership_checked": membership_checked,
+            "county_membership_rule": (
+                "a tract belongs to the county named by the first five digits "
+                "of its GEOID; checked against the boundary file's own STATEFP "
+                "and COUNTYFP for every tract that carries them"),
         },
         "features": out_features,
     }

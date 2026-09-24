@@ -22,7 +22,31 @@ from .metadata import ReleaseMetadata
 from .redact import redact
 from .sentinels import Cell, classify
 
-SUMMARY_LEVEL_NAME = {"05000": "county", "14000": "tract"}
+SUMMARY_LEVEL_NAME = {"04000": "state", "05000": "county", "14000": "tract"}
+
+#: Why an area the release lists has no value in these tables. Said plainly,
+#: because "source cells not retrieved" would read as a failed download.
+ROSTER_ONLY_REASON = (
+    "the release's own geography file lists this area, but none of the "
+    "detailed tables used here publishes a row for it in this release")
+
+
+def summary_file_path(repo_root: Path, release: Release, table: str,
+                      config: ProjectConfig) -> Path:
+    """The cached rows for one table, for this project's coverage.
+
+    A statewide pull is cached under its own name so it never overwrites a
+    narrower earlier one, whose manifest would then stop verifying.
+    """
+    suffix = config.cache_suffix
+    stem = f"{table}{('_' + suffix) if suffix else ''}"
+    return repo_root / f"data/raw/acs/{release.release_id}/summary_file/{stem}.psv"
+
+
+def roster_path(repo_root: Path, release: Release, config: ProjectConfig) -> Path:
+    from .retrieve.acs_summary_file import roster_cache_rel_path
+    return repo_root / roster_cache_rel_path(
+        release, str(config.study_area["state_fips"]))
 
 
 class DatasetError(ValueError):
@@ -127,16 +151,35 @@ class BuildResult:
     diagnostics: list[dict] = field(default_factory=list)
     availability: dict[str, dict[str, bool]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    #: For statewide coverage: the release roster compared with the tables.
+    coverage: dict[str, Any] | None = None
+
+
+def county_display_name(config: ProjectConfig, geoid: str,
+                        county_names: dict[str, str]) -> str:
+    """A county's name as the interface shows it.
+
+    The five New York City counties keep their borough names, because that is
+    how a reader looks for them. Every other county is called by its official
+    name from the boundary file, "Erie County", never by a city inside it.
+    """
+    alias = config.borough_alias(geoid)
+    if alias:
+        return alias
+    return county_names.get(geoid) or config.county_name(geoid)
 
 
 def _area_name(config: ProjectConfig, geoid: str, level: str,
-               geo_names: dict[str, str]) -> str:
+               geo_names: dict[str, str],
+               county_names: dict[str, str] | None = None) -> str:
+    county_names = county_names or {}
+    if level == "state":
+        return geo_names.get(geoid) or geoid
     if level == "county":
-        return config.county_name(geoid)
+        return county_display_name(config, geoid, {**county_names, **geo_names})
     name = geo_names.get(geoid)
     if name:
-        borough = config.county_name(geoid[:5])
-        return f"{name}, {borough}"
+        return f"{name}, {county_display_name(config, geoid[:5], county_names)}"
     return geoid
 
 
@@ -150,7 +193,7 @@ def build(repo_root: Path, config: ProjectConfig, release: Release,
     for table in tables:
         paths: list[Path] = []
         if transport == "summary-file":
-            p = repo_root / f"data/raw/acs/{release.release_id}/summary_file/{table}.psv"
+            p = summary_file_path(repo_root, release, table, config)
             if p.exists():
                 paths = [p]
         else:
@@ -166,8 +209,11 @@ def build(repo_root: Path, config: ProjectConfig, release: Release,
             for geo_id, cells in chunk.items():
                 raw.setdefault(geo_id, {}).update(cells)
 
-    # Classify, restrict to the requested levels and the project's counties.
-    wanted_counties = set(config.county_geoids)
+    # Classify, restrict to the requested levels and the project's coverage.
+    # A statewide project also keeps the state's own row: it is what county
+    # totals are reconciled against and what a state reference reads.
+    if config.statewide and "state" not in levels:
+        levels = ["state", *levels]
     areas: dict[str, Area] = {}
     classified: dict[str, dict[str, Cell]] = {}
     classified_moe: dict[str, dict[str, Cell]] = {}
@@ -180,9 +226,7 @@ def build(repo_root: Path, config: ProjectConfig, release: Release,
         level = SUMMARY_LEVEL_NAME.get(summary_level[:5])
         if level is None or level not in levels:
             continue
-        if level == "county" and geoid not in wanted_counties:
-            continue
-        if level == "tract" and geoid[:5] not in wanted_counties:
+        if not config.in_study_area(geoid, level):
             continue
         geography.validate_geoid(geoid, level)
         areas[geoid] = Area(geoid=geoid, name=geoid, level=level)
@@ -200,6 +244,26 @@ def build(repo_root: Path, config: ProjectConfig, release: Release,
             "responses and the county list in config/project.json"
         )
 
+    # Areas the release lists but these tables have no row for. They are
+    # carried with an explicit reason rather than dropped: a tract missing
+    # from the data would otherwise be a silent hole in the map and a silent
+    # gap in every count of coverage.
+    roster_only: set[str] = set()
+    coverage: dict[str, Any] | None = None
+    if config.statewide:
+        coverage, roster_only = _check_roster(repo_root, release, config,
+                                              areas, levels)
+        for geoid in sorted(roster_only):
+            level = geography.level_for_geoid(geoid)
+            areas[geoid] = Area(geoid=geoid, name=geoid, level=level)
+            classified[geoid] = {}
+            classified_moe[geoid] = {}
+        tract_names = coverage.pop("_tract_names", {})
+        for geoid, tract_part in tract_names.items():
+            if geoid in areas:
+                # The county part is filled in once county names are known.
+                areas[geoid].name = tract_part
+
     # Compute measures.
     values: dict[str, dict[str, dict]] = {}
     availability: dict[str, dict[str, bool]] = {}
@@ -208,7 +272,16 @@ def build(repo_root: Path, config: ProjectConfig, release: Release,
         per_geo: dict[str, dict] = {}
         level_ok = {lvl: False for lvl in levels}
         for geoid, area in areas.items():
-            mv = measures_mod.compute(m, geoid, classified[geoid], classified_moe[geoid])
+            if geoid in roster_only:
+                mv = measures_mod.MeasureValue(
+                    measure_id=m.measure_id, geoid=geoid, unit=m.unit,
+                    kind=m.kind, estimate_status=measures_mod.UNAVAILABLE,
+                    estimate_reason=ROSTER_ONLY_REASON,
+                    moe_status=measures_mod.UNAVAILABLE,
+                    moe_reason=ROSTER_ONLY_REASON)
+            else:
+                mv = measures_mod.compute(m, geoid, classified[geoid],
+                                          classified_moe[geoid])
             per_geo[geoid] = mv.to_json()
             if mv.estimate_status == measures_mod.OK:
                 level_ok[area.level] = True
@@ -221,10 +294,77 @@ def build(repo_root: Path, config: ProjectConfig, release: Release,
                     f"{release.period_label}; the measure is marked unavailable there"
                 )
 
-    return BuildResult(
+    result = BuildResult(
         release=release, areas=areas, values=values,
         availability=availability, warnings=warnings,
     )
+    if coverage is not None:
+        result.coverage = coverage
+    return result
+
+
+def _check_roster(repo_root: Path, release: Release, config: ProjectConfig,
+                  areas: dict[str, "Area"], levels: list[str]
+                  ) -> tuple[dict[str, Any], set[str]]:
+    """Compare the table rows against the release's own list of geographies.
+
+    A table download that succeeds says only that some rows arrived. The
+    release's geography file says which geographies it publishes at all, so
+    this is where "every county and every tract" is proved rather than
+    assumed. A geography in the tables that the roster does not list is an
+    error; one the roster lists that the tables lack is carried and reported.
+    """
+    from .retrieve.acs_summary_file import read_roster
+
+    path = roster_path(repo_root, release, config)
+    if not path.exists():
+        raise DatasetError(
+            f"statewide coverage needs the release's geography roster "
+            f"({path.relative_to(repo_root).as_posix()}), which is not cached. "
+            "Run: python -m census_explorer.cli fetch roster")
+    roster = read_roster(path)
+    report: dict[str, Any] = {
+        "source": ("the release's own geography file (Geos"
+                   f"{release.vintage}{release.period_years}YR.txt), cached at "
+                   f"{path.relative_to(repo_root).as_posix()}"),
+        "state_fips": str(config.study_area["state_fips"]),
+        "levels": {},
+    }
+    roster_only: set[str] = set()
+    for level in levels:
+        listed = {g[9:] for g, v in roster.items() if v["level"] == level}
+        in_tables = {g for g, a in areas.items() if a.level == level}
+        extra = sorted(in_tables - listed)
+        if extra:
+            raise DatasetError(
+                f"{len(extra)} {level} row(s) in the tables are not in the "
+                f"release's geography file ({', '.join(extra[:5])}); the "
+                "cached tables and roster disagree and must be reviewed")
+        missing = sorted(listed - in_tables)
+        roster_only.update(missing)
+        report["levels"][level] = {
+            "listed_by_release": len(listed),
+            "with_table_rows": len(in_tables),
+            "listed_without_table_rows": missing,
+        }
+    # Name every area the roster knows, so one with no boundary polygon (a
+    # water-only tract, typically) is still called by its published name
+    # rather than a bare GEOID. Areas with a polygon are renamed from the
+    # boundary file later; the two agree on the tract part.
+    for geo_id, entry in roster.items():
+        geoid = geo_id[9:]
+        if entry["level"] != "tract" or geoid not in areas and geoid not in roster_only:
+            continue
+        tract_part = entry["name"].split(",")[0].split(";")[0].strip()
+        if tract_part:
+            report.setdefault("_tract_names", {})[geoid] = tract_part
+    fips = str(config.study_area["state_fips"])
+    state_geo = roster.get(f"0400000US{fips}")
+    if fips in areas and state_geo:
+        # Named "New York State", not "New York", so the state is never read
+        # as the city of the same name.
+        areas[fips].name = f"{state_geo['name']} State"
+    return report, roster_only
 
 
 def diagnostics_between_tables(result: BuildResult,
@@ -235,7 +375,8 @@ def diagnostics_between_tables(result: BuildResult,
 
 
 def add_cross_table_diagnostics(repo_root: Path, release: Release,
-                                result: BuildResult, transport: str) -> None:
+                                result: BuildResult, transport: str,
+                                config: ProjectConfig | None = None) -> None:
     """Compare nominally similar totals published in different tables.
 
     B05002 counts the foreign-born population; B05006 counts the foreign-born
@@ -245,7 +386,8 @@ def add_cross_table_diagnostics(repo_root: Path, release: Release,
     raw: dict[str, dict[str, tuple[str | None, str | None]]] = {}
     for table in ("B01003", "B05002", "B05006"):
         if transport == "summary-file":
-            p = repo_root / f"data/raw/acs/{release.release_id}/summary_file/{table}.psv"
+            p = (summary_file_path(repo_root, release, table, config) if config
+                 else repo_root / f"data/raw/acs/{release.release_id}/summary_file/{table}.psv")
             chunks = [read_summary_file(p)] if p.exists() else []
         else:
             api_dir = repo_root / f"data/raw/acs/{release.release_id}/api"
@@ -300,6 +442,9 @@ def attach_geography(repo_root: Path, config: ProjectConfig, release: Release,
     written: dict[str, Path] = {}
     out_dir = repo_root / "data/processed" / release.release_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Counties first, so a tract can be named with its county.
+    county_names: dict[str, str] = {}
+    levels = sorted(levels, key=lambda lv: {"county": 0, "tract": 1}.get(lv, 2))
 
     for level in levels:
         zip_rel = boundaries_mod.cache_rel_path(release, level, config.state_fips)
@@ -341,8 +486,13 @@ def attach_geography(repo_root: Path, config: ProjectConfig, release: Release,
 
         names = {f["properties"]["GEOID"]: f["properties"]["name"]
                  for f in collection["features"]}
+        if level == "county":
+            county_names.update(names)
         for geoid in observed:
-            result.areas[geoid].name = _area_name(config, geoid, level, names)
+            area = result.areas[geoid]
+            fallback = {} if area.name == geoid else {geoid: area.name}
+            area.name = _area_name(config, geoid, level, {**fallback, **names},
+                                   county_names)
         for f in collection["features"]:
             f["properties"]["name"] = result.areas[f["properties"]["GEOID"]].name
 
@@ -430,6 +580,7 @@ def write_processed(repo_root: Path, config: ProjectConfig, release: Release,
         "measures": measures_json,
         "value_files": {mid: f"values/{mid}.json" for mid in sorted(result.values)},
         "join_reports": result.join_reports,
+        "coverage": result.coverage,
         "diagnostics": result.diagnostics,
         "warnings": [redact(w) for w in result.warnings],
     }

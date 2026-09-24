@@ -120,16 +120,78 @@ class ProjectConfig:
     releases: dict[str, Release]
     measures: dict[str, MeasureDef]
 
-    # NYC scope
+    #: The five New York City counties and the borough names used for them.
+    #: This is *not* the dataset's coverage; see `study_area`.
     state_fips: str = "36"
     counties: dict[str, str] = field(default_factory=dict)
 
     @property
     def county_geoids(self) -> list[str]:
+        """The five New York City counties, from `first_project.modern_counties`.
+
+        Kept under its original name because every existing caller means the
+        boroughs by it. New code should say `borough_geoids`. It never means
+        "every county in the dataset": a statewide build has 62 of those, and
+        treating them as New York City would build a city reference from the
+        whole state.
+        """
         return [f"{self.state_fips}{c}" for c in sorted(self.counties)]
 
+    @property
+    def borough_geoids(self) -> list[str]:
+        return self.county_geoids
+
     def county_name(self, geoid: str) -> str:
+        """The borough name for a New York City county, else the GEOID."""
         return self.counties.get(geoid[2:], geoid)
+
+    def borough_alias(self, geoid: str) -> str | None:
+        """A New York City county's borough name, or None for any other county."""
+        if geoid[:2] != self.state_fips:
+            return None
+        return self.counties.get(geoid[2:])
+
+    @property
+    def study_area(self) -> dict:
+        """What the dataset covers.
+
+        A project without a `study_area` keeps its original meaning: the
+        configured counties and their tracts, nothing more.
+        """
+        declared = (self.raw.get("explorer") or {}).get("study_area")
+        if declared:
+            return declared
+        return {"id": "counties", "label": "Configured counties",
+                "coverage": "counties", "state_fips": self.state_fips,
+                "cache_suffix": ""}
+
+    @property
+    def statewide(self) -> bool:
+        return self.study_area.get("coverage") == "state"
+
+    @property
+    def cache_suffix(self) -> str:
+        return str(self.study_area.get("cache_suffix") or "")
+
+    def in_study_area(self, geoid: str, level: str) -> bool:
+        """Whether an area belongs to this project's coverage.
+
+        Statewide coverage takes the state row, every county whose GEOID
+        starts with the state FIPS code, and every tract whose GEOID does.
+        Anything narrower is decided by the configured county list.
+        """
+        study = self.study_area
+        if study.get("coverage") == "state":
+            fips = str(study["state_fips"])
+            if level == "state":
+                return geoid == fips
+            return geoid.startswith(fips)
+        wanted = set(self.county_geoids)
+        if level == "county":
+            return geoid in wanted
+        if level == "tract":
+            return geoid[:5] in wanted
+        return False
 
     def release(self, release_id: str) -> Release:
         try:
@@ -151,6 +213,30 @@ class ProjectConfig:
         for m in self.measures.values():
             tables.update(m.tables)
         return sorted(tables)
+
+
+def _validate_study_area(study: dict | None) -> None:
+    if not study:
+        return
+    coverage = study.get("coverage")
+    if coverage not in ("state", "counties"):
+        raise ConfigError(
+            f"explorer.study_area.coverage must be 'state' or 'counties', "
+            f"not {coverage!r}")
+    fips = str(study.get("state_fips", ""))
+    if not (len(fips) == 2 and fips.isdigit()):
+        raise ConfigError(
+            f"explorer.study_area.state_fips must be a two-digit string, "
+            f"not {study.get('state_fips')!r}")
+    suffix = str(study.get("cache_suffix") or "")
+    if coverage == "state" and not suffix:
+        # A statewide pull written to the same cache file as a narrower one
+        # would overwrite it and break that retrieval's manifest.
+        raise ConfigError(
+            "explorer.study_area.cache_suffix is required for statewide "
+            "coverage, so its cache never overwrites a narrower retrieval")
+    if not suffix.replace("_", "").isalnum() and suffix:
+        raise ConfigError(f"cache_suffix {suffix!r} must be alphanumeric")
 
 
 def _validate_release(r: Release) -> None:
@@ -215,6 +301,8 @@ def load(config_dir: Path | str | None = None) -> ProjectConfig:
         if m.measure_id in measures:
             raise ConfigError(f"duplicate measure_id {m.measure_id}")
         measures[m.measure_id] = m
+
+    _validate_study_area(explorer.get("study_area"))
 
     first = project["first_project"]
     return ProjectConfig(

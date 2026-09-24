@@ -159,7 +159,10 @@ class ReconciliationTests(unittest.TestCase):
         with temp_root() as root:
             d = root / "data/raw/acs/r/summary_file"
             d.mkdir(parents=True)
-            (d / "B01003.psv").write_text(
+            # Written where the configured build reads its rows from, so the
+            # check sees the same file the current dataset was made from.
+            from census_explorer.dataset import summary_file_path
+            summary_file_path(root, release, "B01003", cfg).write_text(
                 "GEO_ID|B01003_E001|B01003_M001\n"
                 + "".join(f"0500000US{g}|100|10\n" for g in cfg.county_geoids),
                 encoding="utf-8")
@@ -189,7 +192,8 @@ class ReconciliationTests(unittest.TestCase):
             d.mkdir(parents=True)
             rows = [f"0500000US{g}|100|10\n" for g in cfg.county_geoids[:-1]]
             rows.append(f"0500000US{cfg.county_geoids[-1]}|-999999999|-999999999\n")
-            (d / "B01003.psv").write_text(
+            from census_explorer.dataset import summary_file_path
+            summary_file_path(root, release, "B01003", cfg).write_text(
                 "GEO_ID|B01003_E001|B01003_M001\n" + "".join(rows), encoding="utf-8")
             (d / "B01003_place_nyc.psv").write_text(
                 "GEO_ID|B01003_E001|B01003_M001\n1600000US3651000|500|10\n",

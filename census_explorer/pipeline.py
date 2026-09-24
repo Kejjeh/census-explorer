@@ -72,6 +72,18 @@ def fetch_geography(repo_root: Path, config: ProjectConfig, release: Release,
     return manifest
 
 
+def fetch_roster(repo_root: Path, config: ProjectConfig, release: Release,
+                 log=print) -> provenance.Manifest:
+    """Retrieve the release's own list of the geographies it publishes."""
+    manifest = new_manifest(release, "roster", "live", repo_root)
+    fips = str(config.study_area["state_fips"])
+    log(f"  streaming the {release.period_label} geography file for state {fips} ...")
+    acs_summary_file.fetch_roster(repo_root, release, fips, manifest,
+                                  progress=lambda s: log("   " + s))
+    save_manifest(repo_root, manifest)
+    return manifest
+
+
 def fetch_observations(repo_root: Path, config: ProjectConfig, release: Release,
                        levels: list[str], transport: str,
                        log=print) -> provenance.Manifest:
@@ -79,11 +91,25 @@ def fetch_observations(repo_root: Path, config: ProjectConfig, release: Release,
     tables = config.all_tables()
 
     if transport == "summary-file":
-        selections = [(lvl, config.county_geoids) for lvl in levels]
+        if config.statewide:
+            # Every row of each level whose GEOID begins with the state FIPS,
+            # plus the state's own published row. The state row is what the
+            # county totals are reconciled against, and the published figure a
+            # state reference is read from; it is not a map level.
+            fips = str(config.study_area["state_fips"])
+            selections = [("state", [fips])] + [(lvl, [fips]) for lvl in levels]
+            log(f"  statewide coverage: state {fips}, levels "
+                f"{', '.join(['state', *levels])}")
+        else:
+            selections = [(lvl, config.county_geoids) for lvl in levels]
         for table in tables:
             log(f"  streaming Summary File for {table} ...")
             acs_summary_file.fetch_table(
-                repo_root, release, table, selections, manifest, progress=lambda s: log("   " + s)
+                repo_root, release, table, selections, manifest,
+                progress=lambda s: log("   " + s),
+                # A different geographic selection goes to a different file,
+                # so an earlier, narrower retrieval and its manifest survive.
+                name_suffix=config.cache_suffix,
             )
     elif transport == "api":
         meta = metadata.load_release_metadata(repo_root, release, tables)
@@ -127,7 +153,8 @@ def build_dataset(repo_root: Path, config: ProjectConfig, release: Release,
             + "\n  - ".join(problems)
         )
     result = dataset.build(repo_root, config, release, meta, levels, transport)
-    dataset.add_cross_table_diagnostics(repo_root, release, result, transport)
+    dataset.add_cross_table_diagnostics(repo_root, release, result, transport,
+                                        config=config)
     dataset.attach_geography(repo_root, config, release, result, levels)
     path = dataset.write_processed(
         repo_root, config, release, meta, result, manifest_id, data_mode, transport,
