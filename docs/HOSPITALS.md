@@ -29,9 +29,17 @@ All sources are keyless and public. They are retrieved only by
 | `locality` | [NYS Locality Hierarchy with Websites](https://data.ny.gov/d/55k6-h6qq) (`55k6-h6qq`) | NYS ITS | rows updated 2023-03-06 | 1,605 |
 | `open_ny_terms` | [Open NY Terms of Use](https://data.ny.gov/download/77gx-ii52/application/pdf) (PDF) | New York State | as retrieved | — |
 
-The retrieval used here is `hospitals-20260925T174343+0000`. Its 12 artifacts
-are under `data/raw/hospitals/20260925T174343+0000/`, which is git-ignored and
+The retrieval used here is `hospitals-20260925T212532+0000`. Its 12 artifacts
+are under `data/raw/hospitals/20260925T212532+0000/`, which is git-ignored and
 never overwritten. `verify manifests` re-hashes them.
+- The first retrieval, `hospitals-20260925T174343+0000`, is kept, but builds
+  refuse it: it predates the pinning of the retrieval configuration (see
+  below), and the configuration was edited after it.
+- Its data files are byte-identical to the new retrieval's, except the
+  Locality Hierarchy. That export holds the same 1,605 rows, in a different
+  order: the Socrata export order is not stable. Nothing built depends on
+  row order.
+- Registry counts are unchanged between the two retrievals.
 
 **Terms.**
 - The NYS datasets declare no license. Their Socrata metadata names NYSDOH, or
@@ -57,6 +65,41 @@ Retrieval stops, and keeps nothing, if any check fails. Files are staged in a
 - **Safe addresses.** The CMS download addresses come from the CMS metadata
   and must be https on `data.cms.gov`. Documents must begin with `%PDF`.
 
+## Provenance of every build
+
+- **Retrieval configuration.** `config/hospitals.json` holds only what
+  retrieval checks: sources, expected headers, documents, and the
+  hospital-family types the provider counts. Its SHA-256 is pinned in each
+  manifest. That hash is taken over canonical JSON, so line endings and key
+  order do not change it. A build refuses a retrieval whose configuration has
+  changed since, or that records none, and says how to retrieve again.
+- **Transformation rules.** County aliases, NY bounds, the certification note
+  and links are in `config/hospital_rules.json`, with a `rules_version`. The
+  canonical SHA-256 of the rules (`rules_sha256`) is recorded in:
+  - `registry.json`, `certification.json` and `index.json`;
+  - the published `data/manifest.json`;
+  - every CSV row.
+
+  A changed rule therefore always shows up as a different `rules_sha256`
+  under the same retrieval. The build here is rules v1, `ddad50c2…`.
+- **Paired outputs.** `hospitals build` writes `index.json`, holding the
+  SHA-256 of `registry.json` and `certification.json` and their shared
+  retrieval, rules, mode and schema.
+  - `site build`, the local service and `hospitals report` refuse any file
+    that does not match the index, or any pair that disagrees on these.
+  - The page refuses a certification file that does not belong to the
+    registry it loaded.
+- **Data mode.** Only the real network fetcher produces a `live`
+  retrieval. An injected fetcher, such as the tests' fake, always produces
+  `fixture`.
+  - Unknown modes are refused.
+  - `site build` refuses hospital data whose mode differs from the census
+    build's, so live census figures are never published beside synthetic
+    hospital records.
+  - For any non-live registry, the page shows a SYNTHETIC HOSPITAL DATA
+    banner, heading and map note, and names the CSV `hospital-sites-SYNTHETIC-…`
+    with a `data_mode` column.
+
 ## Data contracts
 
 - **Identifiers.**
@@ -69,7 +112,12 @@ Retrieval stops, and keeps nothing, if any check fails. Files are staged in a
     appear on more than one row.
   - The 1,743 hospital-family rows describe **1,579 sites**. Site-level
     fields agree across repeats: 0 conflicts.
-  - Operators, cooperators and ownership types are kept as lists. A site
+  - **Conflicts fail closed.** If repeated rows disagree on any site-level
+    field, the build stops and names each fac_id, field and value. No value
+    is chosen by row order. Site-level fields are: name, type, address,
+    city, ZIP, county code and name, coordinates, main site, operating
+    certificate, phone, regional office and open date.
+  - Operators, cooperators and ownership types are kept as sorted lists. A site
     with more than one ownership type is filtered under "Listed with more
     than one ownership type" (none in this release).
 - **Hospital family.** The dataset's own metadata says it holds hospitals and
@@ -86,13 +134,22 @@ Retrieval stops, and keeps nothing, if any check fails. Files are staged in a
 - **Certification rows.**
   - Kept row for row in `certification.json`, keyed by `fac_id`, and never
     joined onto site rows. 10,470 rows belong to registry sites.
-  - Beds: 1,136 rows are "Bed / Permanent". Each certified bed count is
-    shown by category and never added up. They are certified beds, not
-    staffed, available or occupied beds.
+  - Beds: each Bed row is kept whole on its site (`certified_beds`) and in
+    the CSV (`certified_bed_records_json`, one CSV row per site). Each record
+    holds the category, the count or `null` with a note, the raw value, the
+    sub type, the raw and parsed effective date, and a date note. Records
+    are never added up. They are certified beds, not staffed, available or
+    occupied beds, and not current capacity.
+  - In this release, all 1,136 bed rows are "Permanent" with whole counts,
+    no site repeats a category, and 19 bed rows carry the conversion date.
+    The other cases are exercised only by the fixture tests: the same
+    category with another sub type or date, a missing or non-numeric count,
+    and an unparseable date.
   - Services: the measure value of the 7,142 service rows with a blank sub
     type is 0. That contradicts the dictionary's "Count of bed or service
     unit", so service measures are not shown as counts.
-  - Dates: effective dates of 2008-12-30 (1,921 site rows) are flagged. NYSDOH
+  - Dates: effective dates of 2008-12-30 are flagged: 1,921 certification
+    rows for registry sites, beds and services together. NYSDOH
     documents that date as the system-conversion default, so the true date
     is unavailable.
   - Of the rest: 34,897 rows belong to non-hospital facilities. 4 rows name
@@ -171,8 +228,26 @@ python -m census_explorer.cli site build --base /census-explorer/ \
 ## Evidence
 
 **Offline, on synthetic fixtures.** No row in these tests describes a real
-hospital.
-- `python -B -m unittest tests.test_hospitals`: 30 tests, OK. They cover:
+hospital. These are the implementer's runs at `808f847`.
+- `python -B -m unittest tests.test_hospitals`: 43 tests, OK. The repairs
+  added:
+  - a conflicting address, in either row order, with both values in the
+    error;
+  - conflicting coordinates, county code, county name, main site and name;
+  - a fully reversed input building an identical registry;
+  - changed family types or sources refused, and an unpinned retrieval
+    refused;
+  - changed bounds and aliases changing the output and the recorded
+    `rules_sha256`, and a rules hash that ignores line endings;
+  - index round trip, an independently modified file, a mismatched pair,
+    and unknown modes;
+  - a tampered registry refused by `site build` and by the service;
+  - live census with fixture hospitals refused by `site build`;
+  - every bed record kept whole, including a second sub type and date, a
+    missing count, a non-numeric count, an unparseable date and a
+    conversion date.
+
+  The earlier tests cover:
   - IDs with leading zeros and letters;
   - repeated rows becoming one site;
   - certification rows kept without fan-out;
@@ -190,20 +265,29 @@ hospital.
   - the local route;
   - the static build: snapshot stability and byte-identical census files;
   - mismatched registry files.
-- `node --test tests/js/hospitals.test.js`: 8 tests. They cover:
+- `node --test tests/js/hospitals.test.js`: 11 tests, adding the bed-record
+  JSON cell, the pairing check and the synthetic-data warning. They cover:
   - filters, and map/table/CSV parity;
   - CSV formula guarding;
   - unavailable ratings;
   - links limited to official https hosts;
   - escaping.
-- Full suite: `python -B -m unittest discover -s tests -t .`, 508 tests, OK,
+- Full suite: `python -B -m unittest discover -s tests -t .`, 521 tests, OK,
   3 skipped.
+- **Independent reviewer, Windows, at `2fd0d2c`** (before these repairs): 508
+  tests, OK, 6 skipped. This is offline and fixture evidence only; the
+  reviewer did not repeat the live runs.
 
-**Live, on the real retrieval**, registry built at `8b135ce`, headless
-Chromium. The command is
-`node tests/acceptance/journeys.mjs --local http://127.0.0.1:8765/ --static
-http://127.0.0.1:8899/census-explorer/`. All journeys passed: 209 checks, 0
-failed, in both local and static modes. The hospital journeys covered:
+**Live, on the real retrieval** `hospitals-20260925T212532+0000`, registry
+built at `808f847`, headless Chromium. These are the implementer's runs. The
+command is `node tests/acceptance/journeys.mjs --local http://127.0.0.1:8765/
+--static http://127.0.0.1:8899/census-explorer/`. All journeys passed: 213
+checks, 0 failed, in both local and static modes. The static build keeps
+snapshot `ddac376b…`. The hospital journeys covered:
+- the registry is live data, with rules v1, and shows no synthetic-data
+  banner;
+- each CSV row's bed-record JSON equals the registry's records for that site
+  (20 records over the 9 Rockland sites), and no column is a total;
 - the layer is off by default, and nothing hospital-related is requested
   before it is turned on;
 - the registry loads with every reconciliation check passed;
@@ -223,6 +307,17 @@ failed, in both local and static modes. The hospital journeys covered:
   (focus moves to the details), beds by category, and the CSV by Enter,
   with no horizontal overflow and focus never on the page body;
 - the static copy made no request outside its origin.
+
+**Stubbed responses, local service, implementer.** The registry and
+certification responses were rewritten to `fixture` in the browser, because
+no live-mode build can carry fixture hospital data. The checks passed:
+- banner, heading and map note say SYNTHETIC HOSPITAL DATA;
+- the CSV is named `hospital-sites-SYNTHETIC-…` and has `data_mode` fixture;
+- a certification file from another retrieval is refused, and no bed or
+  service is shown.
+
+The script is in the implementer's scratch space and is not part of the
+repository harness.
 
 ## Known gaps
 
