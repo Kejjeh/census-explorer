@@ -1,8 +1,9 @@
 """Command line entry point.
 
 Every command that touches the network says so in its name (``fetch``,
-``reference refresh``, ``smoke``).  ``build``, ``serve``, ``export`` and
-``verify`` are offline operations on the cache.
+``reference refresh``, ``hospitals fetch``, ``smoke``).  ``build``,
+``hospitals build``, ``serve``, ``export`` and ``verify`` are offline
+operations on the cache.
 
 Windows PowerShell and POSIX shells run these identically::
 
@@ -165,6 +166,19 @@ def build_parser() -> argparse.ArgumentParser:
                     help="the path the site will be served under")
     sb.add_argument("--data-dir", default="data/processed",
                     help="use data/fixture-processed to build a fixture site")
+
+    # hospitals -----------------------------------------------------------
+    hp = sub.add_parser(
+        "hospitals", help="hospital registry: CMS and NYSDOH HFIS sources")
+    hsub = hp.add_subparsers(dest="hospitals_action", required=True)
+    hsub.add_parser("fetch", help="explicit network retrieval of every hospital source")
+    hb = hsub.add_parser("build", help="build the registry from a verified retrieval (offline)")
+    hb.add_argument("--manifest", default=None,
+                    help="hospitals-* manifest id (default: the latest)")
+    hb.add_argument("--shapes", default=None,
+                    help="Census county boundary .zip for FIPS codes and the point-in-county check "
+                         "(default: the one the default release retrieved)")
+    hsub.add_parser("report", help="print the built registry's reports (offline)")
 
     # smoke ---------------------------------------------------------------
     sm = sub.add_parser("smoke", help="live network smoke test (explicit, separate action)")
@@ -416,6 +430,33 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
             provenance.write_json(out, report)
             log(f"written to {out.relative_to(root)}")
         return 0 if report["passed"] else 1
+
+    if args.command == "hospitals":
+        from . import hospitals as hospitals_mod
+        from .retrieve import hospitals as hospitals_fetch
+        if args.hospitals_action == "fetch":
+            log("LIVE retrieval of the hospital sources (CMS Provider Data Catalog, "
+                "health.data.ny.gov, data.ny.gov). No key is used.")
+            manifest = hospitals_fetch.fetch_all(root, log=log)
+            for src, info in manifest.inputs["sources"].items():
+                log(f"  {src}: {info['rows']} rows (provider count {info['api_count']})")
+            log("done. Next: python -m census_explorer.cli hospitals build")
+            return 0
+        if args.hospitals_action == "build":
+            registry = hospitals_mod.build(
+                root, args.manifest, Path(args.shapes) if args.shapes else None, log=log)
+            for line in hospitals_mod.summary_lines(registry):
+                log(line)
+            return 0
+        path = root / hospitals_mod.REGISTRY_DIR / "registry.json"
+        if not path.is_file():
+            log("no hospital registry built; run: python -m census_explorer.cli hospitals build")
+            return 1
+        registry = provenance.read_json(path)
+        for line in hospitals_mod.summary_lines(registry):
+            log(line)
+        log(json.dumps(registry["reports"], indent=2))
+        return 0
 
     if args.command == "site":
         report = site_mod.build(root, root / args.out, args.release,
