@@ -45,13 +45,24 @@ From a checkout that already has a built release in `data/processed`
 python -m census_explorer.cli site build --base /census-explorer/ --out site
 ```
 
+For the current statewide build (2019-2023, New York State), the output is:
+
 ```
 release acs5_2023 (2019-2023 ACS), data mode live
-wrote 112 files, 5.2 MB, 47 measures over 2332 areas, release acs5_2023
+wrote 113 files, 16.0 MB, 47 measures over 5474 areas, release acs5_2023
 output: site/  (serve it under /census-explorer/)
 ```
 
-It takes a second or two and touches the network not at all. `--base` is
+The 5,474 areas are the state, 62 counties and 5,411 listed census tracts.
+The earlier New York City-only build wrote 112 files, 5.2 MB, over 2,332
+areas; that figure is historical.
+
+To publish a single release, build from a data directory that holds only
+that release (`--data-dir`, see `docs/RELEASE_NOTES.md`). The comparison
+panels add a line whenever another release is present in the data
+directory.
+
+It takes several seconds and touches the network not at all. `--base` is
 recorded in `data/manifest.json` for the record; every asset and data
 reference in the page is relative, so the same output works at any path.
 
@@ -171,9 +182,20 @@ checked.
 
 ## Rebuilding after a data or code change
 
-`site build` is deterministic for a given `data/processed` and code revision:
-run it again and republish. `data/digests.json` in the published copy records
-what the build wrote, so two builds can be compared file by file.
+Run `site build` again and republish. Repeated builds from the same data
+directory and code revision are **not byte-identical as a whole**:
+
+- `data/manifest.json` records `generated_at`, so it changes on every build.
+- `data/digests.json` and the snapshot in `index.html` follow from it, so
+  they change too, and share links made on one build are refused by the next.
+- Every other file (110 of 113 for the statewide build) is byte-identical
+  across builds.
+
+`data/digests.json` in the published copy records what the build wrote, so
+two builds can be compared file by file. To compare content, compare those
+files, or use the content fingerprint in `docs/RELEASE_NOTES.md`, rather than
+the snapshot. Rebuilding `data/processed` itself also changes `built_at` and
+`code_revision` in `dataset.json`.
 
 
 ### Sharing a published view

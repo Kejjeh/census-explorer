@@ -1,15 +1,23 @@
 # Release candidate: changes since the published source `1dc0965`
 
-Status: **candidate for independent review. Not published, not merged.**
-The current publication (`gh-pages` at `c5f0c4f`, "Publish reviewed New York
-State explorer from 1dc0965") stays as it is until the reviewer decides.
+Status: **published on 2026-09-25** at
+<https://kejjeh.github.io/census-explorer/>, after independent review. PR #1 is
+not merged.
+
+| Publication | |
+| --- | --- |
+| `gh-pages` commit | `eb96a10465d6c900f2827ebb10a5449f0e72e249` (a fast-forward from `c5f0c4f`) |
+| Source revision | `efc9ea107c9b6f4c71694aadf8b64070613cc0f6` |
+| Snapshot | `ddac376b20c21661b0b92e02bd82435de7851f3d8a5112b50e7b9bb66fb7f60c` |
+| Pages deployment | "pages build and deployment" run 36118298955, success, 2026-09-25 09:24:57Z to 09:25:19Z |
+| Rollback target | `c5f0c4f235b0407b4d0af14c9c40a8205bfc08d7`, the previous publication (built from `1dc0965`, snapshot `bb4b31d6…`). To roll back, add a commit restoring that tree; do not force-push. |
 
 | | |
 | --- | --- |
 | Source revision (tested) | `efc9ea107c9b6f4c71694aadf8b64070613cc0f6` |
 | Built from | the tree at that revision, unmodified |
 | Release | 2019-2023 ACS five-year (`acs5_2023`), New York State, 62 counties and 5,411 listed census tracts |
-| Artifact | `artifacts/release-candidate-efc9ea1/` in the implementer's environment (git-ignored; not published). It holds `census-explorer/` (the site), `census-explorer-efc9ea1-site.tar.gz`, `FILES.sha256` and `acceptance-static-journeys.md` |
+| Artifact | `artifacts/release-candidate-efc9ea1/` in the implementer's environment (a git-ignored local copy; its `census-explorer/` is exactly what `gh-pages` `eb96a10` publishes). It holds `census-explorer/` (the site), `census-explorer-efc9ea1-site.tar.gz`, `FILES.sha256` and `acceptance-static-journeys.md` |
 
 ## What changed for readers
 
@@ -50,7 +58,7 @@ python3 -m census_explorer.cli site build --base /census-explorer/ \
 
 **Why a separate data directory.** The site is built from a data directory holding only the published release. The comparison panel adds a line whenever another release is present in the data directory. The implementer's data directory also holds a 2018-2022 build, and building from it added that line, with developer instructions, to four comparison panels. The publication was built from a directory with one release. Building from one here keeps the candidate on the same basis.
 
-**Processed-data provenance.** The processed dataset was rebuilt from the cache at the clean revision `efc9ea1`, and it records that revision. The previous processed build recorded `78c1843…+dirty`. The rebuild changed only `built_at` and `code_revision` in `dataset.json`: all 47 values files and the other 51 processed files are byte-identical. The raw data behind it is unchanged. Retrieval manifest: `observations-summary-file-acs5_2023-20260924T033904+0000`, plus the metadata, geography, roster and reconciliation manifests listed in `data/manifest.json`. `verify manifests` re-hashed every cached artifact and found no problem.
+**Processed-data provenance.** The processed dataset was rebuilt from the cache at the clean revision `efc9ea1`, and it records that revision. The previous processed build recorded `78c1843…+dirty`. 52 of the 53 processed files are unchanged, including all 47 values files; only `dataset.json` changed, and only in `built_at` and `code_revision`. The raw data behind it is unchanged. Retrieval manifest: `observations-summary-file-acs5_2023-20260924T033904+0000`, plus the metadata, geography, roster and reconciliation manifests listed in `data/manifest.json`. `verify manifests` re-hashed every cached artifact and found no problem.
 
 ## Identity of this build
 
@@ -97,6 +105,21 @@ The 10 files that differ:
 - `efc9ea1`, real Chrome, local service, desktop viewport: Skip to the table → Tab → Enter → Tab → Tab lands on Open brief, 4 keystrokes from the table, with the URL unchanged. This was **not** an independent check at 390 px or of the static site.
 - `8083c02`, Windows full suite: 466 tests, OK, 6 skipped. `48cb3b2`, Windows: the harness tests passed 7 of 7.
 - The reviewer's independent statewide retrieval and build reconciled 6/6 for the state and for New York City, and the 111 digested assets of the current publication matched.
+
+## After publication (implementer)
+
+These checks were run after deployment, by the implementer:
+- **Deployed bytes.** `data/digests.json` was downloaded from the public site; its SHA-256 is `803169ad…`, as expected. Every one of the 113 files in its inventory, including `.nojekyll`, was then downloaded with a cache-busting query. All returned HTTP 200, all 111 listed digests match the deployed bytes, and every file matches the candidate's `FILES.sha256`.
+- **Public smoke test.** Headless Chromium at 390 CSS px, through the session proxy, trusting only the proxy CA's public key: 17 of 17 checks passed.
+  - The live build is `efc9ea1`, snapshot `ddac376b…`.
+  - 62 counties, 5,411 tracts, and Erie County's 261 tracts.
+  - The keyboard route: Share, Open brief and Download CSV in 3, 4 and 5 presses from the table, with the address unchanged.
+  - Margin-of-error and "no data" labels, with Suffolk tract 36103145601's reason.
+  - A current-build share link restores the view and survives a reload.
+  - A link made on the previous publication (snapshot `bb4b31d6…`) is refused with "It was made from a different published snapshot of the data".
+  - No console errors, and no request outside `/census-explorer/`.
+
+  The script and its output are kept with the candidate artifact.
 
 ## Limits that still apply
 

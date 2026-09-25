@@ -91,6 +91,19 @@ candidate is described in `docs/RELEASE_NOTES.md`:
 | `journeys.mjs --static` on the candidate artifact itself | implementer | 85 checks, 0 failed |
 | Printed briefs, 13 pages inspected by eye (brief code unchanged since `143fece`) | implementer | see the print row above |
 
+## Publication record
+
+| | |
+| --- | --- |
+| Published | 2026-09-25, `gh-pages` `eb96a10465d6c900f2827ebb10a5449f0e72e249`, a fast-forward from `c5f0c4f` |
+| Source | `efc9ea107c9b6f4c71694aadf8b64070613cc0f6` (the release notes are on the source branch at `bfd8284` and later) |
+| Snapshot | `ddac376b20c21661b0b92e02bd82435de7851f3d8a5112b50e7b9bb66fb7f60c` |
+| Rollback target | `c5f0c4f235b0407b4d0af14c9c40a8205bfc08d7` (the previous publication, built from `1dc0965`) |
+| Deployment | Pages run 36118298955: success |
+| Deployed bytes (implementer) | All 113 files downloaded and matched to the candidate; `data/digests.json` `803169ad…` |
+| Public smoke (implementer) | 17/17 at 390 CSS px, headless Chromium; details in `docs/RELEASE_NOTES.md` |
+| Independent checks of the deployment | none recorded yet |
+
 ## Open items
 
 - **Page images are checked by eye, not by the script.** `briefs.mjs` checks
