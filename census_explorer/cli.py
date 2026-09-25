@@ -166,6 +166,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="the path the site will be served under")
     sb.add_argument("--data-dir", default="data/processed",
                     help="use data/fixture-processed to build a fixture site")
+    sb.add_argument("--hospitals", default=None, metavar="DIR",
+                    help="also publish the hospital registry built in DIR "
+                         "(for example data/processed/hospitals); off by default")
 
     # hospitals -----------------------------------------------------------
     hp = sub.add_parser(
@@ -460,7 +463,8 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
 
     if args.command == "site":
         report = site_mod.build(root, root / args.out, args.release,
-                                args.data_dir, args.base, log=log)
+                                args.data_dir, args.base, log=log,
+                                hospitals_dir=(root / args.hospitals) if args.hospitals else None)
         log(f"wrote {report.summary()}")
         log(f"output: {args.out}/  (serve it under {args.base})")
         return 0

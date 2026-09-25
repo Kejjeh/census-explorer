@@ -304,7 +304,7 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
                 conflicts.append({"fac_id": fac_id, "field": col, "values": values})
             site[field] = rows[0][col]
         site["fac_id_is_numeric_text"] = bool(FAC_ID_RE.match(fac_id))
-        site["type_group"] = "main" if site["type"] in main_types else "hospital_operated"
+        site["type_group"] = "hospital" if site["type"] in main_types else "extension"
         operators = []
         for r in rows:
             op = {"name": r["Operator Name"], "city": r["Operator City"]}
@@ -361,7 +361,7 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
     for s in sites:
         ms = s["main_site_fac_id"]
         if not ms:
-            s["main_site_status"] = "is_main_site" if s["type_group"] == "main" else "not_listed"
+            s["main_site_status"] = "is_main_site" if s["type_group"] == "hospital" else "not_listed"
         elif ms == s["fac_id"]:
             s["main_site_status"] = "self"
         elif ms in by_id:
@@ -488,25 +488,25 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
     site_ccns: dict[str, list[str]] = defaultdict(list)
     for e in entities:
         for c in e["hfis_candidates"]:
-            if c["type_group"] == "main":
+            if c["type_group"] == "hospital":
                 site_ccns[c["fac_id"]].append(e["ccn"])
     for e in entities:
-        mains = [c for c in e["hfis_candidates"] if c["type_group"] == "main"]
+        mains = [c for c in e["hfis_candidates"] if c["type_group"] == "hospital"]
         shared = [c["fac_id"] for c in mains if len(site_ccns[c["fac_id"]]) > 1]
         if len(mains) == 1 and not shared:
             e["hfis_match_state"] = "candidate"
-            e["hfis_match_note"] = ("One HFIS main site has the same normalized address "
+            e["hfis_match_note"] = ("One HFIS hospital has the same normalized address "
                                     "and ZIP. Unreviewed: not a confirmed match.")
         elif mains:
             e["hfis_match_state"] = "ambiguous"
             e["hfis_match_note"] = (
-                "Several HFIS main sites share this address and ZIP." if len(mains) > 1 else
-                "The HFIS main site at this address is also the candidate for "
+                "Several HFIS hospitals share this address and ZIP." if len(mains) > 1 else
+                "The HFIS hospital at this address is also the candidate for "
                 + ", ".join(x for x in site_ccns[shared[0]] if x != e["ccn"]) + ".")
         else:
             e["hfis_match_state"] = "unresolved"
             e["hfis_match_note"] = (
-                "Only hospital-operated HFIS sites share this address; no main site does."
+                "Only HFIS hospital extension sites share this address; no hospital does."
                 if e["hfis_candidates"] else
                 "No HFIS hospital-family site has this normalized address and ZIP.")
     ent_state = {e["ccn"]: e["hfis_match_state"] for e in entities}
@@ -596,8 +596,10 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
                 "cms_ny_by_type": dict(Counter(e["hospital_type"] for e in entities)),
                 "nys_general_rows": len(general), "hospital_family_rows": len(fam_rows),
                 "hospital_family_sites": len(sites),
-                "main_sites": sum(1 for s in sites if s["type_group"] == "main"),
-                "hospital_operated_sites": sum(1 for s in sites if s["type_group"] != "main"),
+                "hospital_sites": sum(1 for s in sites if s["type_group"] == "hospital"),
+                "hospitals_listing_another_main_site": sum(
+                    1 for s in sites if s["type_group"] == "hospital" and s["main_site_status"] == "listed"),
+                "extension_sites": sum(1 for s in sites if s["type_group"] == "extension"),
                 "sites_by_type": dict(Counter(s["type"] for s in sites)),
                 "excluded_rows_by_type": excluded,
                 "certification_rows": len(cert_all),
@@ -757,7 +759,8 @@ def summary_lines(registry: dict) -> list[str]:
         f"CMS Hospital General Information: {c['cms_rows']} rows, {c['cms_ny_rows']} in New York",
         f"NYS HFIS General: {c['nys_general_rows']} rows, {c['hospital_family_rows']} in the "
         f"hospital family -> {c['hospital_family_sites']} sites "
-        f"({c['main_sites']} main, {c['hospital_operated_sites']} hospital-operated)",
+        f"({c['hospital_sites']} hospitals, of which {c['hospitals_listing_another_main_site']} "
+        f"list another hospital as main site; {c['extension_sites']} extension sites)",
         f"  excluded rows by type: {c['excluded_rows_by_type']}",
         f"NYS HFIS Certification: {c['certification_rows']} rows, "
         f"{c['certification_rows_for_sites']} for registry sites",

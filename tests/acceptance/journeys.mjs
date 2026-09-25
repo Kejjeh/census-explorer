@@ -496,6 +496,191 @@ async function resultActionsRoute(mode, url) {
   await finish(app, `${mode} result actions`);
 }
 
+/* ------------------------------------------------------ hospital layer */
+
+/** Everything the census view shows, to prove the hospital layer leaves it alone. */
+async function acsFingerprint(page) {
+  return page.evaluate(() => ({
+    scope: state.scope, level: state.level, measure: state.measureId, pick: state.pick,
+    compare: [...state.compare], hash: location.hash,
+    paths: document.querySelectorAll('#map-layer > path').length,
+    fills: [...document.querySelectorAll('#map-layer > path')].map((p) => p.getAttribute('fill')).join('|'),
+    table: document.getElementById('table-body').textContent.replace(/\s+/g, ' ').trim(),
+    scopeBar: document.getElementById('scope-bar').textContent.replace(/\s+/g, ' ').trim(),
+    legend: document.getElementById('legend').textContent.replace(/\s+/g, ' ').trim(),
+  }));
+}
+
+const hospMarks = (page) => page.$$eval('#hosp-layer .hosp-mark', (els) => els.map((e) => e.dataset.fac));
+
+/**
+ * The optional hospital layer: off by default and loads nothing; county
+ * filter; map, table and CSV describe the same records; an unlocated site
+ * stays listed with its reason; main-site links; CMS ratings only on CMS
+ * entities, with footnotes; turning the layer off restores the census view.
+ */
+async function hospitalLayer(mode, url) {
+  report.section(`${mode}: hospital layer`);
+  const app = await openApp(mode, url, DESKTOP);
+  const { page } = app;
+  const hospRequests = [];
+  page.on('request', (r) => { if (/hospitals/.test(r.url())) hospRequests.push(r.url()); });
+  await page.click('#region-switch button[data-region="nys"]'); await idle(page, 'nys');
+  const before = await acsFingerprint(page);
+  report.check(await page.isVisible('#hosp-toggle') && !(await page.isChecked('#hosp-toggle'))
+    && (await hospMarks(page)).length === 0 && hospRequests.length === 0,
+  'the layer is offered, off by default, and nothing hospital-related is requested or drawn',
+  { requests: hospRequests.length });
+
+  await page.check('#hosp-toggle');
+  await page.waitForSelector('#hosp-summary', { timeout: 60000 });
+  const reg = await page.evaluate(() => HospitalLayer._state.reg);
+  const sites = reg.sites;
+  report.check(sites.length === reg.reports.counts.hospital_family_sites && reg.cms_entities.length === reg.reports.counts.cms_ny_rows,
+    'the registry loads whole', `${sites.length} sites, ${reg.cms_entities.length} CMS entities, retrieval ${reg.retrieval_manifest_id}`);
+  report.check(reg.reports.checks.every((c) => c.passed), 'every reconciliation check in the loaded registry passed',
+    reg.reports.checks.map((c) => c.check_id));
+
+  // A county with at least one unlocated site, so "missing location" is exercised.
+  const byCounty = {};
+  sites.forEach((s) => { (byCounty[s.county_fips] ||= []).push(s); });
+  const county = Object.keys(byCounty).filter((c) => byCounty[c].some((s) => s.location_status !== 'valid'))
+    .sort((a, b) => byCounty[a].length - byCounty[b].length)[0];
+  const expected = byCounty[county];
+  const expectedLocated = expected.filter((s) => s.location_status === 'valid').map((s) => s.fac_id).sort();
+  await page.selectOption('#hosp-county', county);
+  await page.waitForTimeout(150);
+  const marks = (await hospMarks(page)).sort();
+  const summary = await text(page, '#hosp-summary');
+  report.check(JSON.stringify(marks) === JSON.stringify(expectedLocated),
+    `county filter (${expected[0].county_name}, ${county}): the map draws exactly its located sites`,
+    `${marks.length} markers; ${expected.length} sites, ${expected.length - expectedLocated.length} unlocated`);
+  report.check(summary.startsWith(`${expected.length.toLocaleString('en-US')} of ${sites.length.toLocaleString('en-US')} sites match.`)
+    && summary.includes(`${expectedLocated.length.toLocaleString('en-US')} are on the map`)
+    && summary.includes(`${(expected.length - expectedLocated.length).toLocaleString('en-US')} have no published location`),
+  'the directory summary states the same counts', summary);
+  const rows = await page.$$eval('#hosp-rows button[data-fac]', (b) => b.map((x) => x.dataset.fac));
+  report.check(rows.length === Math.min(25, expected.length) && rows.every((f) => expected.some((s) => s.fac_id === f)),
+    'the table lists only that county\'s sites', `${rows.length} rows on page 1`);
+
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#hosp-csv')]);
+  const csv = fs.readFileSync(await download.path(), 'utf8').trim().split('\r\n');
+  const csvIds = csv.slice(1).map((l) => l.split(',')[0]).sort();
+  report.check(csvIds.length === expected.length
+    && JSON.stringify(csvIds) === JSON.stringify(expected.map((s) => s.fac_id).sort()),
+  'the CSV holds exactly the filtered records, unlocated ones included', `${csvIds.length} rows, ${download.suggestedFilename()}`);
+
+  // An unlocated site: listed, reason shown, not drawn.
+  const unlocated = expected.find((s) => s.location_status !== 'valid');
+  await page.fill('#hosp-q', unlocated.fac_id); await page.waitForTimeout(150);
+  await page.click(`#hosp-rows button[data-fac="${unlocated.fac_id}"]`); await page.waitForTimeout(150);
+  const det = await text(page, '#hosp-detail');
+  report.check(det.includes('Not mapped.') && det.includes(unlocated.location_reason)
+    && det.includes('stays in the directory and the CSV') && !(await hospMarks(page)).includes(unlocated.fac_id),
+  'an unlocated site shows its reason and is not drawn', `${unlocated.fac_id}: ${unlocated.location_reason}`);
+  await page.fill('#hosp-q', ''); await page.selectOption('#hosp-county', '');
+
+  // A hospital-operated site links to its main site; the main site lists it back.
+  const op = sites.find((s) => s.type_group === 'extension' && s.main_site_status === 'listed' && s.location_status === 'valid');
+  await page.fill('#hosp-q', op.fac_id); await page.waitForTimeout(150);
+  await page.click(`#hosp-rows button[data-fac="${op.fac_id}"]`); await page.waitForTimeout(150);
+  const opText = await text(page, '#hosp-detail');
+  await page.click(`#hosp-detail button[data-open-fac="${op.main_site_fac_id}"]`); await page.waitForTimeout(150);
+  const mainText = await text(page, '#hosp-detail');
+  report.check(opText.includes('Hospital extension site') && opText.includes(`HFIS ${op.main_site_fac_id}`)
+    && mainText.includes(`${op.main_site_name}`) && mainText.includes('list this as their main site'),
+  'an extension site links to its main site, which lists the sites under it', `${op.fac_id} → ${op.main_site_fac_id}`);
+  report.check(!/star rating/i.test(mainText) && !/of 5\b/.test(mainText),
+    'no CMS rating is shown on an HFIS site');
+  await page.fill('#hosp-q', '');
+
+  // A marker opens its site and leaves the census selection alone.
+  const pickBefore = await page.evaluate(() => state.pick);
+  const mark = await page.$(`#hosp-layer .hosp-mark[data-fac="${op.fac_id}"]`);
+  if (mark) {
+    await page.click('#zoom-fit');
+    const box = await mark.boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(200);
+    const picked = await page.evaluate(() => HospitalLayer._state.pick);
+    // Several markers can share an address; the one drawn on top opens.
+    report.check(typeof picked === 'string' && (await page.evaluate(() => state.pick)) === pickBefore,
+      'clicking a marker opens a site and does not change the census selection', `opened ${picked}`);
+  } else {
+    report.check(false, 'the chosen located extension site has a marker', op.fac_id);
+  }
+
+  // CMS entities: ratings with their footnotes, unavailable is a reason.
+  await page.click('#hosp-tab-cms'); await page.waitForTimeout(100);
+  const na = reg.cms_entities.find((e) => e.overall_rating_status === 'not_available' && e.overall_rating_footnotes.length);
+  const rated = reg.cms_entities.find((e) => e.overall_rating_status === 'rated');
+  const openEnt = async (e) => {
+    await page.evaluate((c) => HospitalLayer.openEntity(c, { focus: true }), e.ccn);
+    await page.waitForTimeout(120);
+    return text(page, '#hosp-detail');
+  };
+  const naText = await openEnt(na);
+  report.check(naText.includes('Not available') && naText.includes(na.overall_rating_footnotes[0].text)
+    && !/\b0 of 5\b/.test(naText), 'an unrated CMS entity shows "Not available" with the CMS footnote', `${na.ccn}: footnote ${na.overall_rating_footnotes[0].code}`);
+  const ratedText = await openEnt(rated);
+  const href = await page.$eval('#hosp-detail a[href*="medicare.gov"]', (a) => a.href).catch(() => null);
+  report.check(ratedText.includes(`${rated.overall_rating} of 5`) && ratedText.includes('Not a rating of any one HFIS site')
+    && href === `https://www.medicare.gov/care-compare/details/hospital/${rated.ccn}`,
+  'a rated entity shows its CMS rating as an entity-level value, with the Care Compare link by CCN', `${rated.ccn}: ${href}`);
+  const amb = reg.cms_entities.find((e) => e.hfis_match_state === 'ambiguous');
+  const ambText = amb ? await openEnt(amb) : '';
+  report.check(Boolean(amb) && ambText.includes('HFIS site candidates: Ambiguous') && !/confirmed match/i.test(ambText.replace('None is a confirmed match', '')),
+    'an ambiguous CCN is shown as ambiguous, with its evidence, never as a match', amb && amb.ccn);
+  await shot(page, `${mode}-hospitals-cms`);
+
+  // Off again: the census view is exactly as it was.
+  await page.uncheck('#hosp-toggle'); await page.waitForTimeout(150);
+  const after = await acsFingerprint(page);
+  report.check((await hospMarks(page)).length === 0 && await page.isHidden('#hospitals'),
+    'turning the layer off removes every marker and the directory');
+  report.check(JSON.stringify(before) === JSON.stringify(after),
+    'with the layer off the census map, table, legend, scope and address are unchanged',
+    `${after.paths} shapes, scope ${after.scope}`);
+  await finish(app, `${mode} hospital layer`);
+}
+
+/** Keyboard only at 390 CSS px: turn the layer on, filter, open a site, export. */
+async function hospitalKeyboard(mode, url) {
+  report.section(`${mode}: hospital layer, keyboard only at 390 CSS px`);
+  const app = await openApp(mode, url, NARROW);
+  const { page } = app;
+  const presses = {};
+  presses.toggle = await tabTo(page, "el.id === 'hosp-toggle'", 'the hospital layer toggle');
+  await page.keyboard.press('Space');
+  await page.waitForSelector('#hosp-summary', { timeout: 60000 });
+  report.check(await page.isChecked('#hosp-toggle'), 'Space turns the layer on');
+  presses.search = await tabTo(page, "el.id === 'hosp-q'", 'the hospital search');
+  const name = await page.evaluate(() => HospitalLayer._state.reg.sites.find((s) => s.type_group === 'hospital' && s.certified_bed_categories.length).name);
+  await page.keyboard.type(name.slice(0, 14));
+  await page.waitForTimeout(150);
+  presses.county = await tabTo(page, "el.id === 'hosp-county'", 'the county filter');
+  presses.row = await tabTo(page, "el.matches('#hosp-rows button[data-fac]')", 'the first directory row');
+  report.check(await focusVisible(page) === true, 'focus is visible on the directory row', await focusVisible(page));
+  await page.keyboard.press('Enter'); await page.waitForTimeout(250);
+  const active = await page.evaluate(() => document.activeElement.id);
+  report.check(active === 'hosp-detail', 'Enter opens the details and moves focus to them', active);
+  await page.waitForFunction(() => !/Loading…/.test(document.getElementById('hosp-cert').textContent), null, { timeout: 30000 });
+  const det = await text(page, '#hosp-detail');
+  report.check(/Certified beds/.test(det) && /never added up/.test(det) && !/total beds/i.test(det),
+    'certified beds are listed by category and never totalled');
+  presses.csv = await tabTo(page, "el.id === 'hosp-csv'", 'the CSV download', { back: true });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
+  const n = fs.readFileSync(await download.path(), 'utf8').trim().split('\r\n').length - 1;
+  const expected = await page.evaluate(() => HospitalLayer._state.filtered.length);
+  report.check(n === expected, 'Enter on the CSV button downloads exactly the filtered sites', `${n} rows`);
+  report.check(await page.evaluate(() => document.activeElement !== document.body), 'focus never fell back to the page body');
+  report.note('Tab presses to each stop', presses);
+  await layoutAudit(page, 'hospital directory with details open');
+  await page.$eval('#hosp-detail', (el) => el.scrollIntoView());
+  await shot(page, `${mode}-390-hospital-detail`);
+  await finish(app, `${mode} hospital keyboard`);
+}
+
 /* ------------------------------------------------------------ run */
 
 const targets = [['local', args.local], ['static', args.static]].filter(([, u]) => u);
@@ -504,6 +689,7 @@ const JOURNEYS = {
   'county-to-tract': countyToTract, comparison: outsideComparison,
   share: (mode, url) => (mode === 'static' ? shareAndReload(url) : null),
   failure: loadFailure, layout: narrowLayout, keyboard: keyboardOnly, 'result-actions': resultActionsRoute,
+  hospitals: hospitalLayer, 'hospitals-keyboard': hospitalKeyboard,
 };
 if (args.only && !JOURNEYS[args.only]) {
   console.error(`--only must be one of: ${Object.keys(JOURNEYS).join(', ')}`); process.exit(2);

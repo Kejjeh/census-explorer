@@ -337,8 +337,12 @@ def _quality_cases(state: server.ServiceState, release_id: str, level: str,
 
 def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
           data_dir: str = "data/processed", base_path: str = "",
-          log=print) -> BuildReport:
-    """Write the whole static site into `out_dir`."""
+          log=print, hospitals_dir: Path | None = None) -> BuildReport:
+    """Write the whole static site into `out_dir`.
+
+    ``hospitals_dir`` (a built hospital registry) is optional and off by
+    default, so a census-only build is unchanged by the hospital layer.
+    """
     repo_root = Path(repo_root).resolve()
     target = check_out_dir(out_dir, repo_root)
     # Written beside the target, in a directory this build creates and
@@ -349,7 +353,7 @@ def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
                                     dir=target.parent))
     try:
         report = _build_into(staging, repo_root, release_id, data_dir,
-                            base_path, log)
+                            base_path, log, hospitals_dir)
         _replace_directory(staging, target)
     except BaseException:
         # Only the directory this build made is removed.
@@ -360,6 +364,39 @@ def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
         files=[target / f.relative_to(staging) for f in report.files],
         bytes_written=report.bytes_written, release_id=report.release_id,
         measures=report.measures, areas=report.areas)
+
+
+HOSPITALS_PREFIX = "data/hospitals/"
+
+
+def _write_hospitals(src: Path, data: Path, files: list[Path], log) -> dict:
+    """Publish a built hospital registry, compactly, with its provenance."""
+    from . import hospitals as hospitals_mod
+    registry = json.loads((src / "registry.json").read_text("utf-8"))
+    cert = json.loads((src / "certification.json").read_text("utf-8"))
+    if registry.get("schema_version") != hospitals_mod.REGISTRY_SCHEMA:
+        raise ValueError(f"{src}/registry.json has an unsupported schema version")
+    if cert.get("retrieval_manifest_id") != registry.get("retrieval_manifest_id"):
+        raise ValueError(f"{src}: registry and certification come from different retrievals")
+    total = _write(data / "hospitals" / "registry.json", strip_local_paths(registry), files)
+    total += _write(data / "hospitals" / "certification.json", strip_local_paths(cert), files)
+    log(f"hospital registry {registry['retrieval_manifest_id']}: "
+        f"{len(registry['sites'])} sites, {len(registry['cms_entities'])} CMS entities")
+    return {
+        "_bytes": total,
+        "retrieval_manifest_id": registry["retrieval_manifest_id"],
+        "data_mode": registry.get("data_mode"),
+        "built_at": registry.get("built_at"),
+        "code_revision": registry.get("code_revision"),
+        "sites": len(registry["sites"]),
+        "cms_entities": len(registry["cms_entities"]),
+        "sources": {k: {f: v.get(f) for f in ("title", "publisher", "dataset_id",
+                                              "released", "modified", "rows_updated_at",
+                                              "rows", "sha256")}
+                    for k, v in registry["sources"].items()},
+        "note": ("Hospital registry files are digested with the rest of the site but "
+                 "are not part of the census snapshot."),
+    }
 
 
 def _replace_directory(staging: Path, target: Path) -> None:
@@ -401,7 +438,8 @@ def _replace_directory(staging: Path, target: Path) -> None:
 
 
 def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
-                data_dir: str, base_path: str, log) -> BuildReport:
+                data_dir: str, base_path: str, log,
+                hospitals_dir: Path | None = None) -> BuildReport:
     """Write the site into an empty directory this build owns."""
     files: list[Path] = []
     written = 0
@@ -429,7 +467,8 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
     # handler reads it: a build run against a data directory somewhere else
     # must still publish this app, not look for one beside the data.
     web = server.WEB_DIR
-    for name in ("app.css", "app.js", "core.js", "static.js", "publish.js"):
+    for name in ("app.css", "app.js", "core.js", "static.js", "publish.js",
+                 "hospitals.js"):
         source = web / name
         written += _write(out_dir / name, source.read_bytes(), files)
     index = (web / "index.html").read_text(encoding="utf-8")
@@ -577,6 +616,12 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
                            "containing_county": county_refs,
                            "questions": questions_for}, files)
 
+    # -- the optional hospital layer ----------------------------------------
+    hospitals_section = None
+    if hospitals_dir is not None:
+        hospitals_section = _write_hospitals(Path(hospitals_dir), data, files, log)
+        written += hospitals_section.pop("_bytes")
+
     # -- the manifest a reader can check the site against ------------------
     manifest = {
         "site": SITE_MARKER,
@@ -613,6 +658,8 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
                      "project's wording about them. No raw retrieval cache, no "
                      "saved view, no credential and no local path is included."),
     }
+    if hospitals_section is not None:
+        manifest["hospitals"] = hospitals_section
     if data_mode != "live":
         manifest["warning"] = (
             "FIXTURE DATA — every value in this build is synthetic test data "
@@ -623,9 +670,14 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
     snapshot_inputs = {path.relative_to(out_dir).as_posix():
                        provenance.sha256_bytes(path.read_bytes())
                        for path in sorted(files) if data in path.parents}
+    # The hospital files are digested and checked like every other file,
+    # but they are not part of the census snapshot: refreshing the hospital
+    # registry must not invalidate census share links, and a census-only
+    # build keeps the same snapshot it always had.
     snapshot = provenance.sha256_bytes(json.dumps(
         {key: value for key, value in snapshot_inputs.items()
-         if key != "data/manifest.json"}, sort_keys=True).encode())
+         if key != "data/manifest.json"
+         and not key.startswith(HOSPITALS_PREFIX)}, sort_keys=True).encode())
     page = out_dir / "index.html"
     page.write_text(page.read_text("utf-8").replace("__CENSUS_SNAPSHOT__", snapshot)
                     .replace('"__CENSUS_DIGESTS__"', json.dumps(snapshot_inputs, separators=(",", ":"))), encoding="utf-8")

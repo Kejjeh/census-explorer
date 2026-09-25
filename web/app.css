@@ -652,3 +652,53 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
 
 .share-panel {margin:16px; padding:16px; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius)}
 .share-panel input {width:100%; min-width:0; box-sizing:border-box}
+
+/* ------------------------------------------------ optional hospital layer */
+.hosp-toggle-row { margin-top: var(--s2); }
+.hosp-toggle { display: inline-flex; align-items: center; gap: var(--s2); min-height: 28px;
+  font-size: 13px; cursor: pointer; }
+.hosp-toggle input { width: 24px; height: 24px; margin: 0; flex: none; }
+.hosp-mark.main { fill: #7f1d1d; stroke: #ffffff; }
+.hosp-mark.operated { fill: #ffffff; stroke: #7f1d1d; }
+.hosp-mark[data-pick="true"] { fill: var(--pick); stroke: #ffffff; }
+.hospitals { margin-top: var(--s5); border-top: 1px solid var(--line); padding-top: var(--s4); }
+.hosp-head h2 { margin: 0 0 var(--s1); }
+.hosp-tabs { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s3) 0; }
+.hosp-tabs .chip { min-height: 28px; font-size: 13px; }
+.hosp-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s3); align-items: end; }
+.hosp-filters select, .hosp-filters input { width: 100%; min-height: 32px; box-sizing: border-box; }
+.hosp-summary { margin: var(--s3) 0 var(--s2); font-size: 13px; }
+.hosp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.hosp-table th, .hosp-table td { text-align: left; vertical-align: top; padding: 6px var(--s2);
+  border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.hosp-table thead th { font-size: 12px; color: var(--muted); }
+.hosp-table tbody th { font-weight: 400; }
+.hosp-table tr.picked { background: var(--accent-soft); }
+.hosp-table .tiny, .hosp-detail .tiny { display: inline-block; }
+.linkish { font: inherit; background: none; border: 0; padding: 2px 0; min-height: 24px;
+  color: var(--accent); text-decoration: underline; cursor: pointer; text-align: left; }
+.hosp-detail { margin-top: var(--s4); padding: var(--s3) var(--s4); background: var(--raise);
+  border: 1px solid var(--line); border-radius: var(--radius); }
+.hosp-detail h3 { margin: 0 0 var(--s1); }
+.hosp-detail h4 { margin: var(--s4) 0 var(--s1); font-size: 14px; }
+.hosp-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--s3); margin: var(--s2) 0; }
+.hosp-dl dt { color: var(--muted); font-size: 13px; }
+.hosp-dl dd { margin: 0; overflow-wrap: anywhere; }
+.hosp-mini { border-collapse: collapse; font-size: 13px; margin: var(--s2) 0; }
+.hosp-mini th, .hosp-mini td { text-align: left; padding: 4px var(--s2); border-bottom: 1px solid var(--line); }
+.hosp-services { columns: 2; font-size: 13px; }
+.hosp-links a { overflow-wrap: anywhere; }
+.hosp-coverage { margin-top: var(--s4); font-size: 13px; }
+.hosp-coverage summary, .hosp-detail summary { min-height: 24px; padding: 2px 0; cursor: pointer; }
+@media (max-width: 820px) {
+  .hosp-dl { grid-template-columns: 1fr; }
+  .hosp-dl dt { margin-top: var(--s2); }
+  .hosp-services { columns: 1; }
+  /* Rows become stacked cards; each cell names its column. */
+  .hosp-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .hosp-table tr { display: block; padding: var(--s2) 0; border-bottom: 1px solid var(--line); }
+  .hosp-table th, .hosp-table td { display: block; border: 0; padding: 2px 0; }
+  .hosp-table td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-size: 12px; }
+}
+@media print { .hosp-toggle-row, .hospitals { display: none; } }

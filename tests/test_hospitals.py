@@ -280,7 +280,7 @@ class RegistryBuild(unittest.TestCase):
     def test_main_site_relationship_is_kept_as_listed(self):
         self.assertEqual(self.sites["0101"]["main_site_status"], "is_main_site")
         self.assertEqual(self.sites["202"]["main_site_status"], "listed")
-        self.assertEqual(self.sites["202"]["type_group"], "hospital_operated")
+        self.assertEqual(self.sites["202"]["type_group"], "extension")
         self.assertEqual(self.sites["606"]["main_site_status"], "not_in_registry")
         self.assertEqual(self.sites["0101"]["operated_site_count"], 1)
 
@@ -408,6 +408,117 @@ class Normalization(unittest.TestCase):
         self.assertEqual(H.parse_coordinate("42.1", "-73.5", b)[2], "valid")
         self.assertEqual(H.parse_coordinate("40.7", "-74.5", b)[2], "valid")
         self.assertEqual(H.parse_coordinate("39.9", "-75.1", b)[2], "outside_new_york")
+
+
+def write_registry(root: Path, data_dir: str = "data/processed") -> tuple[dict, dict]:
+    """Retrieve (fake), build and write a synthetic registry under root."""
+    from census_explorer import provenance
+    fetch(root)
+    reg, cert = H.build_registry(H.load_inputs(root, None, CFG), CFG, county_shapes=COUNTIES)
+    out = root / data_dir / "hospitals"
+    provenance.write_json(out / "registry.json", reg)
+    provenance.write_json(out / "certification.json", cert)
+    return reg, cert
+
+
+class ServiceAndStaticSite(unittest.TestCase):
+    """The layer is optional: without it the census build is unchanged."""
+
+    @classmethod
+    def setUpClass(cls):
+        import re
+        from census_explorer import site
+        from tests.test_end_to_end import build, stage_project
+        cls._tmp = temp_root()
+        cls.root = cls._tmp.__enter__()
+        cls._off = offline()
+        cls._off.__enter__()
+        cls.cfg = stage_project(cls.root)
+        build(cls.root, cls.cfg)
+        quiet = lambda *a: None  # noqa: E731
+        cls.plain = cls.root / "plain"
+        site.build(cls.root, cls.plain, "testrel", base_path="/x/", log=quiet)
+        cls.reg, cls.cert = write_registry(cls.root)
+        cls.withh = cls.root / "withh"
+        site.build(cls.root, cls.withh, "testrel", base_path="/x/", log=quiet,
+                   hospitals_dir=cls.root / "data/processed/hospitals")
+
+        def config(d):
+            html = (d / "index.html").read_text("utf-8")
+            return json.loads(re.search(r"window.CENSUS_EXPLORER_STATIC = (.*?);</script>", html).group(1))
+        cls.cfg_plain, cls.cfg_with = config(cls.plain), config(cls.withh)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._off.__exit__(None, None, None)
+        cls._tmp.__exit__(None, None, None)
+
+    def test_census_only_build_carries_no_hospital_file(self):
+        self.assertFalse((self.plain / "data/hospitals").exists())
+        self.assertFalse(any(k.startswith("data/hospitals/") for k in self.cfg_plain["dataDigests"]))
+        self.assertNotIn("hospitals", json.loads((self.plain / "data/manifest.json").read_text()))
+
+    def test_hospital_files_are_digested_but_leave_the_census_snapshot_alone(self):
+        from census_explorer import provenance
+        self.assertEqual(self.cfg_plain["snapshot"], self.cfg_with["snapshot"])
+        for name in ("data/hospitals/registry.json", "data/hospitals/certification.json"):
+            self.assertEqual(self.cfg_with["dataDigests"][name],
+                             provenance.sha256_bytes((self.withh / name).read_bytes()))
+        digests = json.loads((self.withh / "data/digests.json").read_text())
+        self.assertIn("data/hospitals/registry.json", digests["files"])
+        # Every census data file is byte-identical with and without the layer.
+        for path in (self.plain / "data").rglob("*.json"):
+            rel = path.relative_to(self.plain).as_posix()
+            if rel in ("data/manifest.json", "data/digests.json"):
+                continue
+            self.assertEqual(path.read_bytes(), (self.withh / rel).read_bytes(), rel)
+
+    def test_published_registry_is_the_built_one_and_names_its_retrieval(self):
+        pub = json.loads((self.withh / "data/hospitals/registry.json").read_text())
+        self.assertEqual(len(pub["sites"]), len(self.reg["sites"]))
+        man = json.loads((self.withh / "data/manifest.json").read_text())
+        self.assertEqual(man["hospitals"]["retrieval_manifest_id"], self.reg["retrieval_manifest_id"])
+        self.assertEqual(man["hospitals"]["sites"], 5)
+        # No path on the build machine is published.
+        self.assertNotIn(str(self.root), (self.withh / "data/hospitals/registry.json").read_text())
+
+    def test_mismatched_registry_and_certification_are_refused(self):
+        from census_explorer import provenance, site
+        bad = self.root / "bad"
+        provenance.write_json(bad / "registry.json", self.reg)
+        provenance.write_json(bad / "certification.json", {**self.cert, "retrieval_manifest_id": "other"})
+        with self.assertRaisesRegex(ValueError, "different retrievals"):
+            site.build(self.root, self.root / "badsite", "testrel", log=lambda *a: None,
+                       hospitals_dir=bad)
+
+    def test_local_service_serves_the_built_files_and_explains_their_absence(self):
+        from census_explorer import server
+        st = server.ServiceState(self.root)
+        body = st.hospital_bytes("registry")
+        self.assertEqual(body, (self.root / "data/processed/hospitals/registry.json").read_bytes())
+        with self.assertRaises(KeyError):
+            st.hospital_bytes("../project")
+        missing = server.ServiceState(self.root, "data/fixture-processed")
+        with self.assertRaisesRegex(FileNotFoundError, "hospitals fetch"):
+            missing.hospital_bytes("registry")
+
+
+class BrowserLogic(unittest.TestCase):
+    def test_hospital_layer_logic_passes_its_own_tests(self):
+        import os
+        import subprocess
+        from tests.test_ui_core import _node
+        node = _node()
+        if node is None:
+            self.skipTest("Node is not installed; run: node --test tests/js/hospitals.test.js")
+        repo = Path(__file__).resolve().parents[1]
+        proc = subprocess.run(
+            [node, "--test", "--test-reporter=tap", str(repo / "tests/js/hospitals.test.js")],
+            cwd=repo, capture_output=True, text=True, timeout=300,
+            env={**os.environ, "NODE_OPTIONS": ""})
+        if proc.returncode != 0:
+            self.fail(proc.stdout[-4000:] + proc.stderr[-2000:])
+        self.assertRegex(proc.stdout, r"(?m)^#\s*fail\s+0\s*$")
 
 
 if __name__ == "__main__":

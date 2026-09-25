@@ -140,6 +140,20 @@ class ServiceState:
         return self.repo_root / self.dataset_rel(release_id)
 
     # -- loading ---------------------------------------------------------
+    #: Hospital registry files, served verbatim from ``<data dir>/hospitals``.
+    HOSPITAL_FILES = ("registry", "certification")
+
+    def hospital_bytes(self, name: str) -> bytes:
+        if name not in self.HOSPITAL_FILES:
+            raise KeyError(f"no hospital file {name!r}")
+        path = self.repo_root / self.data_dir / "hospitals" / f"{name}.json"
+        if not path.is_file():
+            raise FileNotFoundError(
+                "no hospital registry is built for this data directory. Retrieve and "
+                "build it with: python -m census_explorer.cli hospitals fetch, then "
+                "hospitals build")
+        return path.read_bytes()
+
     def available_releases(self) -> list[str]:
         root = self.repo_root / self.data_dir
         if not root.exists():
@@ -1559,6 +1573,11 @@ class Handler(BaseHTTPRequestHandler):
             if not pid:
                 raise ValueError("id is required")
             return self._json(replay_project(st, pid))
+
+        if path in ("/api/hospitals", "/api/hospitals/certification"):
+            name = "registry" if path == "/api/hospitals" else "certification"
+            return self._send(200, st.hospital_bytes(name),
+                              "application/json; charset=utf-8")
 
         if path == "/api/figure":
             release = one("release") or st.config.raw["explorer"]["default_release"]

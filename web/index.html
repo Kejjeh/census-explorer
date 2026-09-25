@@ -155,6 +155,11 @@
       </div>
       <div id="legend" class="legend"></div>
       <figcaption class="muted tiny" id="map-caption"></figcaption>
+      <div id="hosp-toggle-row" class="hosp-toggle-row" hidden>
+        <label class="hosp-toggle"><input type="checkbox" id="hosp-toggle">
+          Show hospital sites (NYSDOH and CMS registries, separate from the census data)</label>
+        <p id="hosp-map-note" class="muted tiny" aria-live="polite"></p>
+      </div>
     </figure>
 
     <div class="table-block">
@@ -177,6 +182,8 @@
       <p id="table-empty" class="empty-state" hidden></p>
       <nav id="table-pager" class="table-pager" aria-label="Table pages"></nav>
     </div>
+
+    <section id="hospitals" class="hospitals" aria-labelledby="hosp-title" hidden></section>
   </section>
 
   <aside class="inspect" id="inspect" aria-label="Selected place">
@@ -217,6 +224,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="core.js"></script>
 <script src="publish.js"></script>
+<script src="hospitals.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

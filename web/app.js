@@ -363,6 +363,17 @@ async function boot() {
     applyStaticMode();
   }
   wireControls();
+  if (window.HospitalLayer) {
+    window.HospitalLayer.init({
+      api,
+      // A published copy offers the layer only if it carries the registry; the
+      // service offers it with live census data and says so if none is built.
+      available: STATIC
+        ? Boolean((window.CENSUS_EXPLORER_STATIC.dataDigests || {})['data/hospitals/registry.json'])
+        : state.status.data_mode === 'live',
+      scopeCounties: () => scopeGeoids(state.scope, 'county'),
+    });
+  }
   renderLevelSwitch();
   renderSidebar();
   // A link that chose a view has already said what to show; onboarding must
@@ -1398,6 +1409,7 @@ function drawMap() {
       'geography vintage. The table below still carries every value.';
     map._bboxes = null;
     map._drawn = new Set();
+    if (window.HospitalLayer) window.HospitalLayer.draw(null);
     return;
   }
   empty.hidden = true;
@@ -1496,6 +1508,9 @@ function drawMap() {
   //: Exactly the areas this map drew, so the caption can say what it did and
   //: did not cover without guessing from a build-wide join report.
   map._drawn = new Set(Object.keys(bboxes));
+  // The optional hospital layer draws into the same group, so it pans and
+  // zooms with the areas. It draws nothing unless the reader turned it on.
+  if (window.HospitalLayer) window.HospitalLayer.draw({ layer: g, project });
   applyView();
   markMapSelection();
 }
@@ -1506,6 +1521,7 @@ function applyView() {
   if (!map._layer) return;
   const { k, x, y } = state.view;
   map._layer.setAttribute('transform', `translate(${x} ${y}) scale(${k})`);
+  if (window.HospitalLayer) window.HospitalLayer.zoom(k);
 }
 
 function clampView() {
@@ -1580,6 +1596,7 @@ function wireMapGestures() {
     drag = {
       id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0,
       geoid: (e.target.dataset && e.target.dataset.geoid) || null,
+      fac: (e.target.dataset && e.target.dataset.fac) || null,
     };
     host.setPointerCapture(e.pointerId);
     host.classList.add('dragging');
@@ -1602,12 +1619,14 @@ function wireMapGestures() {
   });
   const endDrag = (e) => {
     if (!drag || drag.id !== e.pointerId) return;
-    const { moved, geoid } = drag;
+    const { moved, geoid, fac } = drag;
     drag = null;
     host.classList.remove('dragging');
     // A drag is a pan, not a click. Anything past a few pixels of travel
     // selects nothing, so panning across the city never changes the selection.
-    if (moved < DRAG_SLOP && geoid) selectArea(geoid);
+    // A hospital marker opens its site and leaves the census selection alone.
+    if (moved < DRAG_SLOP && fac && window.HospitalLayer) window.HospitalLayer.openSite(fac);
+    else if (moved < DRAG_SLOP && geoid) selectArea(geoid);
   };
   host.addEventListener('pointerup', endDrag);
   // A cancelled gesture (the browser taking over, a touch turning into a

@@ -398,6 +398,9 @@ function createStaticBackend(config) {
       };
     }
 
+    if (path === '/api/hospitals') return file('hospitals/registry.json');
+    if (path === '/api/hospitals/certification') return file('hospitals/certification.json');
+
     if (path === '/api/projects') return { projects: [] };
 
     const err = new Error(
