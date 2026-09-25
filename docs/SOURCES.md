@@ -40,6 +40,11 @@ command, cached with a checksum, and recorded in a manifest.
 | [Cartographic boundary files, GENZ2022](https://www2.census.gov/geo/tiger/GENZ2022/shp/) | The same, for the comparison release. |
 | [Census Data API key signup](https://api.census.gov/data/key_signup.html) | The optional keyed transport. Metadata queries do not need a key; data queries do. |
 
+Hospital Explorer phase 1 adds CMS Hospital General Information and its
+Footnote Crosswalk, the NYSDOH HFIS General and Certification datasets, the
+NYS ITS Locality Hierarchy and the Open NY terms. Their releases, checks,
+data contracts and known flaws are in `docs/HOSPITALS.md`.
+
 ### Observations recorded while implementing
 
 - Keyed data queries redirect to a "Missing Key" page rather than returning an

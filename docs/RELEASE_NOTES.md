@@ -110,7 +110,7 @@ The 10 files that differ:
 
 These checks were run after deployment, by the implementer:
 - **Deployed bytes.** `data/digests.json` was downloaded from the public site; its SHA-256 is `803169ad…`, as expected. Every one of the 113 files in its inventory, including `.nojekyll`, was then downloaded with a cache-busting query. All returned HTTP 200, all 111 listed digests match the deployed bytes, and every file matches the candidate's `FILES.sha256`.
-- **Public smoke test.** Headless Chromium at 390 CSS px, through the session proxy, trusting only the proxy CA's public key: 17 of 17 checks passed.
+- **Public smoke test.** Headless Chromium at 390 CSS px, through the session proxy: 17 of 17 checks passed. Chromium was started with `--ignore-certificate-errors-spki-list` pinned to the proxy CA's public key, which is a certificate-validation exception. The reviewer asked that none be used again; later checks use trusted access only, or report the TLS or browser blocker instead.
   - The live build is `efc9ea1`, snapshot `ddac376b…`.
   - 62 counties, 5,411 tracts, and Erie County's 261 tracts.
   - The keyboard route: Share, Open brief and Download CSV in 3, 4 and 5 presses from the table, with the address unchanged.
@@ -120,6 +120,13 @@ These checks were run after deployment, by the implementer:
   - No console errors, and no request outside `/census-explorer/`.
 
   The script and its output are kept with the candidate artifact.
+
+## After publication (independent reviewer)
+
+As reported by the reviewer, and kept separate from the implementer's checks above:
+- `origin/gh-pages` is at `eb96a10`.
+- The deployed `data/digests.json` has SHA-256 `803169adb78355c18979ac98afdd3502a222bfefbaa4918c3c9fedb8b7b4ab44`.
+- All 111 listed assets were downloaded and matched by SHA-256, with 0 mismatches.
 
 ## Limits that still apply
 

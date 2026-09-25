@@ -102,7 +102,8 @@ candidate is described in `docs/RELEASE_NOTES.md`:
 | Deployment | Pages run 36118298955: success |
 | Deployed bytes (implementer) | All 113 files downloaded and matched to the candidate; `data/digests.json` `803169ad…` |
 | Public smoke (implementer) | 17/17 at 390 CSS px, headless Chromium; details in `docs/RELEASE_NOTES.md` |
-| Independent checks of the deployment | none recorded yet |
+| Independent checks of the deployment | As reported by the reviewer, not reproduced by the implementer: `origin/gh-pages` at `eb96a10`, deployed `data/digests.json` SHA-256 `803169adb78355c18979ac98afdd3502a222bfefbaa4918c3c9fedb8b7b4ab44`, all 111 listed assets downloaded and matched by SHA-256 (0 mismatches). |
+| Certificate handling of the implementer's public smoke | The implementer's public smoke test ran Chromium through the session proxy with `--ignore-certificate-errors-spki-list` pinned to the proxy CA. The reviewer asked that no certificate-validation exception be used again: later checks use trusted access only, or report the TLS or browser blocker. |
 
 ## Open items
 
