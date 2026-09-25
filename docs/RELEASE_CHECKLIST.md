@@ -70,6 +70,27 @@ belong to the reviewer and are not claimed here.
 | What the pages show | No clipped columns. No row split across a page; table headers repeat on continuation pages. Headings, the denominator, margins of error, no-data reasons, sources and reproducibility details are all visible. |
 | Print defects found and fixed | The local chart's tick labels overlapped its subtitle. The published brief printed doubled full stops. A New York City tract brief quoted the state's 16 boundary-less tracts instead of its own 3, with a population of "0.0". Commit `35fc9b3`. |
 
+## Release candidate (`efc9ea1`)
+
+Tested source head: `efc9ea107c9b6f4c71694aadf8b64070613cc0f6`. The
+candidate is described in `docs/RELEASE_NOTES.md`:
+- the build command and data provenance;
+- the snapshot `ddac376b…`, the `data/digests.json` SHA-256 `803169ad…` and the
+  content fingerprint `2513ab42…`;
+- the file-by-file differences from the current publication (`gh-pages`
+  `c5f0c4f`, built from `1dc0965`). 103 of 113 files are byte-identical,
+  including every published value.
+
+| Evidence at `efc9ea1` | Who | Result |
+| --- | --- | --- |
+| Full offline suite, Linux | implementer | 478 tests, OK, 3 skipped; Node 42/42 |
+| Full offline suite, Windows, bundled Node | independent reviewer | 478 tests in 34.185 s, OK, 6 skipped |
+| Diff review of `web/index.html`, `app.js`, `app.css` | independent reviewer | no blocking issue |
+| Real Chrome, local service, desktop | independent reviewer | Skip to the table → Tab → Enter → Tab → Tab lands on Open brief (4 keystrokes from the table); URL unchanged. Not an independent check at 390 px or of the static site |
+| `journeys.mjs`, local service and static build, headless Chromium, including 390 px and keyboard only | implementer | all journeys, 0 failed |
+| `journeys.mjs --static` on the candidate artifact itself | implementer | 85 checks, 0 failed |
+| Printed briefs, 13 pages inspected by eye (brief code unchanged since `143fece`) | implementer | see the print row above |
+
 ## Open items
 
 - **Page images are checked by eye, not by the script.** `briefs.mjs` checks
