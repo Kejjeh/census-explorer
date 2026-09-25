@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "Hospital Explorer phase 1 sources. Every URL is a keyless public endpoint; retrieval happens only in 'hospitals fetch'. Expected headers are the exact CSV header rows observed on 2026-09-25; any difference stops retrieval and build (schema drift).",
+  "note": "Hospital Explorer phase 1 retrieval configuration: sources, documents and the hospital-family types the provider counts at retrieval. Every URL is a keyless public endpoint; retrieval happens only in 'hospitals fetch'. Expected headers are the exact CSV header rows observed on 2026-09-25; any difference stops retrieval and build (schema drift). A hash of this configuration (canonical JSON) is pinned in each retrieval manifest, and a build refuses a retrieval whose configuration has since changed. Transformation rules live in config/hospital_rules.json.",
   "sources": {
     "cms_general": {
       "title": "Hospital General Information",
@@ -70,23 +70,5 @@
     "note": "HFIS 'Description' values in scope. The General dataset's own metadata says it covers hospitals and extension clinics, but the file holds 23 facility types; every other type is excluded and counted.",
     "main_site_types": ["Hospital", "Primary Care Hospital - Critical Access Hospital", "Rural Emergency Hospital"],
     "hospital_operated_types": ["Hospital Extension Clinic", "School Based Hospital Extension Clinic", "Mobile Hospital Extension Clinic", "Primary Care Hospital - Critical Access Hospital Extension Clinic", "School Based Primary Care Hospital - Critical Access Extension Clinic", "Rural Emergency Hospital Extension Clinic", "Off-Campus Emergency Department"]
-  },
-  "county_name_aliases": {
-    "note": "HFIS county name -> the same county's name in each crosswalk source, where the spelling differs. Reviewed spelling differences, not fuzzy matches. FIPS codes come from the Census Bureau's own county list (the cartographic boundary file of the default ACS release); the NYS ITS Locality Hierarchy is an independent cross-check, because on 2026-09-25 it listed St Lawrence County with FIPS 36099, which is Seneca County's code (St Lawrence is 36089).",
-    "Saint Lawrence": {"census": "St. Lawrence", "locality": "St Lawrence"}
-  },
-  "ny_bounds": {
-    "note": "Outer limits of New York State used only to reject impossible coordinates (TIGER state extent, rounded outward). Points inside are still checked against county shapes.",
-    "min_lat": 40.47, "max_lat": 45.02, "min_lon": -79.77, "max_lon": -71.78
-  },
-  "certification": {
-    "conversion_default_date": "2008-12-30",
-    "conversion_note": "NYSDOH: when operating-certificate data moved to HFIS, commencement dates of some hospital services and of D&TC and hospice beds and services defaulted to the conversion date, so effective dates for items approved before December 30, 2008 are not available."
-  },
-  "links": {
-    "nys_profiles_listing": "https://profiles.health.ny.gov/hospital/alpha/",
-    "nys_profiles_note": "NYS Health Profiles identifies hospitals by its own profile numbers, not by HFIS facility IDs, and no official crosswalk was found; this link opens the official A–Z list.",
-    "care_compare_prefix": "https://www.medicare.gov/care-compare/details/hospital/",
-    "care_compare_note": "Care Compare address built from the CMS Certification Number (CCN). The format is CMS's own; the site answers any address, so a link is not proof that a profile exists."
   }
 }

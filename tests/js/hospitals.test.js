@@ -82,3 +82,48 @@ test('facets list unmatched counties rather than hiding them', () => {
   const f = H.facets([...SITES, site('9', { county_fips: null, county_name_hfis: 'Nowhere', county_name: 'Nowhere' })]);
   assert.ok(f.counties.some((c) => c.value === 'unmatched' && c.label === 'Nowhere (no FIPS)'));
 });
+
+test('the CSV keeps every bed record whole, one row per site, never a total', () => {
+  const beds = [
+    { category: 'Intensive Care', beds: 10, measure_value_raw: '10', count_note: '', sub_type: 'Permanent',
+      effective_date_raw: '03/21/1988', effective_date: '1988-03-21', effective_date_note: '' },
+    { category: 'Intensive Care', beds: 4, measure_value_raw: '4', count_note: '', sub_type: 'Temporary',
+      effective_date_raw: '05/01/2020', effective_date: '2020-05-01', effective_date_note: '' },
+    { category: 'Pediatric', beds: null, measure_value_raw: '', count_note: 'no count published', sub_type: 'Permanent',
+      effective_date_raw: '13/45/2020', effective_date: null, effective_date_note: 'unparseable' },
+    { category: 'Medical / Surgical', beds: 120, measure_value_raw: '120', count_note: '', sub_type: 'Permanent',
+      effective_date_raw: '12/30/2008', effective_date: '2008-12-30', effective_date_note: 'conversion_default' },
+  ];
+  const reg = { retrieval_manifest_id: 'm', data_mode: 'fixture', rules_version: 1, rules_sha256: 'abc', dates: { nys: 'd' } };
+  const text = H.sitesCsv([site('0101', { certified_beds: beds }), site('9')], reg);
+  const lines = text.trim().split('\r\n');
+  assert.strictEqual(lines.length, 3, 'one row per site');
+  // Parse the quoted CSV cell back out.
+  const cells = [];
+  let cur = ''; let q = false;
+  for (let i = 0; i < lines[1].length; i += 1) {
+    const ch = lines[1][i];
+    if (q) { if (ch === '"' && lines[1][i + 1] === '"') { cur += '"'; i += 1; } else if (ch === '"') q = false; else cur += ch; }
+    else if (ch === '"') q = true; else if (ch === ',') { cells.push(cur); cur = ''; } else cur += ch;
+  }
+  cells.push(cur);
+  const col = (name) => cells[H.SITE_CSV_COLUMNS.indexOf(name)];
+  assert.deepStrictEqual(JSON.parse(col('certified_bed_records_json')), beds);
+  assert.strictEqual(col('data_mode'), 'fixture');
+  assert.strictEqual(col('rules_sha256'), 'abc');
+  assert.ok(!H.SITE_CSV_COLUMNS.some((c) => /total|capacity|sum/i.test(c)));
+});
+
+test('registry and certification must come from the same build', () => {
+  const reg = { schema_version: 1, data_mode: 'live', retrieval_manifest_id: 'a', rules_sha256: 'r' };
+  assert.doesNotThrow(() => H.checkPair(reg, { ...reg }));
+  assert.throws(() => H.checkPair(reg, { ...reg, retrieval_manifest_id: 'b' }), /does not belong/);
+  assert.throws(() => H.checkPair(reg, { ...reg, rules_sha256: 'x' }), /does not belong/);
+  assert.throws(() => H.checkPair(reg, { ...reg, data_mode: 'fixture' }), /does not belong/);
+  assert.throws(() => H.checkPair({ ...reg, data_mode: 'demo' }, null), /unknown data mode/);
+});
+
+test('non-live hospital data always carries its own warning', () => {
+  assert.strictEqual(H.modeWarning({ data_mode: 'live' }), '');
+  assert.match(H.modeWarning({ data_mode: 'fixture' }), /SYNTHETIC HOSPITAL DATA/);
+});

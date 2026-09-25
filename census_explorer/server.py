@@ -144,15 +144,22 @@ class ServiceState:
     HOSPITAL_FILES = ("registry", "certification")
 
     def hospital_bytes(self, name: str) -> bytes:
+        """One registry file, served only after the pair is checked against
+        its index (bytes, schema, retrieval, rules and data mode)."""
+        from . import hospitals as hospitals_mod
         if name not in self.HOSPITAL_FILES:
             raise KeyError(f"no hospital file {name!r}")
-        path = self.repo_root / self.data_dir / "hospitals" / f"{name}.json"
-        if not path.is_file():
+        out = self.repo_root / self.data_dir / "hospitals"
+        if not (out / "registry.json").is_file():
             raise FileNotFoundError(
                 "no hospital registry is built for this data directory. Retrieve and "
                 "build it with: python -m census_explorer.cli hospitals fetch, then "
                 "hospitals build")
-        return path.read_bytes()
+        try:
+            _index, registry, cert = hospitals_mod.read_outputs(out)
+        except hospitals_mod.RegistryError as exc:
+            raise ValueError(str(exc)) from None
+        return registry if name == "registry" else cert
 
     def available_releases(self) -> list[str]:
         root = self.repo_root / self.data_dir

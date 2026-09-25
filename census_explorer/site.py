@@ -369,25 +369,37 @@ def build(repo_root: Path, out_dir: Path, release_id: str | None = None,
 HOSPITALS_PREFIX = "data/hospitals/"
 
 
-def _write_hospitals(src: Path, data: Path, files: list[Path], log) -> dict:
-    """Publish a built hospital registry, compactly, with its provenance."""
+def _write_hospitals(src: Path, data: Path, files: list[Path], log,
+                     census_mode: str) -> dict:
+    """Publish a built hospital registry, compactly, with its provenance.
+
+    The pair is verified against its index first (bytes, schema, retrieval,
+    rules, mode). Hospital data whose mode differs from the census build's is
+    refused: live census figures are never published beside synthetic
+    hospital records, nor the other way round.
+    """
     from . import hospitals as hospitals_mod
-    registry = json.loads((src / "registry.json").read_text("utf-8"))
-    cert = json.loads((src / "certification.json").read_text("utf-8"))
-    if registry.get("schema_version") != hospitals_mod.REGISTRY_SCHEMA:
-        raise ValueError(f"{src}/registry.json has an unsupported schema version")
-    if cert.get("retrieval_manifest_id") != registry.get("retrieval_manifest_id"):
-        raise ValueError(f"{src}: registry and certification come from different retrievals")
+    index, reg_bytes, cert_bytes = hospitals_mod.read_outputs(src)
+    registry = json.loads(reg_bytes)
+    cert = json.loads(cert_bytes)
+    if registry["data_mode"] != census_mode:
+        raise ValueError(
+            f"the hospital registry in {src} is {registry['data_mode']!r} data but the "
+            f"census build is {census_mode!r}; the two are not published together")
     total = _write(data / "hospitals" / "registry.json", strip_local_paths(registry), files)
     total += _write(data / "hospitals" / "certification.json", strip_local_paths(cert), files)
-    log(f"hospital registry {registry['retrieval_manifest_id']}: "
+    log(f"hospital registry {registry['retrieval_manifest_id']} ({registry['data_mode']}): "
         f"{len(registry['sites'])} sites, {len(registry['cms_entities'])} CMS entities")
     return {
         "_bytes": total,
         "retrieval_manifest_id": registry["retrieval_manifest_id"],
-        "data_mode": registry.get("data_mode"),
+        "data_mode": registry["data_mode"],
         "built_at": registry.get("built_at"),
         "code_revision": registry.get("code_revision"),
+        "retrieval_config_sha256": registry["retrieval_config_sha256"],
+        "rules_version": registry["rules_version"],
+        "rules_sha256": registry["rules_sha256"],
+        "built_files_sha256": index["files"],
         "sites": len(registry["sites"]),
         "cms_entities": len(registry["cms_entities"]),
         "sources": {k: {f: v.get(f) for f in ("title", "publisher", "dataset_id",
@@ -395,7 +407,9 @@ def _write_hospitals(src: Path, data: Path, files: list[Path], log) -> dict:
                                               "rows", "sha256")}
                     for k, v in registry["sources"].items()},
         "note": ("Hospital registry files are digested with the rest of the site but "
-                 "are not part of the census snapshot."),
+                 "are not part of the census snapshot. built_files_sha256 are the "
+                 "build's own files; the published copies are re-serialized compactly "
+                 "and carry their own digests in data/digests.json."),
     }
 
 
@@ -619,7 +633,8 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
     # -- the optional hospital layer ----------------------------------------
     hospitals_section = None
     if hospitals_dir is not None:
-        hospitals_section = _write_hospitals(Path(hospitals_dir), data, files, log)
+        hospitals_section = _write_hospitals(Path(hospitals_dir), data, files, log,
+                                             data_mode)
         written += hospitals_section.pop("_bytes")
 
     # -- the manifest a reader can check the site against ------------------

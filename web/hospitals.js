@@ -133,10 +133,34 @@ const SITE_CSV_COLUMNS = [
   'main_site_status', 'address1', 'address2', 'city', 'zip', 'hfis_county_code',
   'hfis_county_name', 'county_fips', 'county_crosswalk', 'ownership', 'ownership_types',
   'operators', 'latitude', 'longitude', 'location_status', 'location_reason',
-  'location_county_check', 'certified_beds_by_category', 'certification_rows',
+  'location_county_check', 'certified_bed_records_json', 'certification_rows',
   'cms_ccn_candidates', 'open_date_as_published', 'hfis_rows_updated',
-  'retrieval_manifest_id',
+  'data_mode', 'retrieval_manifest_id', 'rules_version', 'rules_sha256',
 ];
+
+/**
+ * Registry and certification documents are only used together if they come
+ * from the same build: same schema, retrieval, rules and data mode. Unknown
+ * modes are refused rather than shown.
+ */
+function checkPair(registry, cert) {
+  if (!registry || registry.schema_version !== 1) throw new Error('The hospital registry has an unsupported schema.');
+  if (!['live', 'fixture'].includes(registry.data_mode)) {
+    throw new Error(`The hospital registry has an unknown data mode (${registry.data_mode}); it is not shown.`);
+  }
+  if (!cert) return;
+  for (const key of ['schema_version', 'retrieval_manifest_id', 'rules_sha256', 'data_mode']) {
+    if (cert[key] !== registry[key]) {
+      throw new Error(`The hospital certification file does not belong to this registry (${key} differs); neither is shown.`);
+    }
+  }
+}
+
+/** Words that must accompany any hospital record that is not live data. */
+function modeWarning(registry) {
+  return registry.data_mode === 'live' ? ''
+    : 'SYNTHETIC HOSPITAL DATA (fixture mode). These hospital records are test data, not NYSDOH or CMS records, whatever the census data on this page is.';
+}
 
 /** A CSV cell. Text that a spreadsheet would run as a formula is prefixed
  *  with an apostrophe; plain numbers (negative longitudes) are left alone. */
@@ -157,10 +181,13 @@ function sitesCsv(list, registry) {
       (s.ownership_types || []).join('; '),
       (s.operators || []).map((o) => o.name).join('; '),
       s.lat, s.lon, s.location_status, s.location_reason, s.location_county_check,
-      (s.certified_bed_categories || []).map((b) => `${b.category}: ${b.beds}`).join('; '),
+      // Every bed record whole, as JSON: category, count or why there is none,
+      // sub type, raw and parsed date, date note. Never a total.
+      JSON.stringify(s.certified_beds || []),
       s.certification_rows,
       (s.cms_candidates || []).map((c) => `${c.ccn} (${c.state})`).join('; '),
-      s.open_date_raw, updated, registry.retrieval_manifest_id,
+      s.open_date_raw, updated, registry.data_mode, registry.retrieval_manifest_id,
+      registry.rules_version, registry.rules_sha256,
     ].map(hospCsvField).join(','));
   });
   return rows.join('\r\n') + '\r\n';
@@ -206,6 +233,7 @@ function createHospitalLayer() {
     if (hs.reg) return;
     if (!hs.loading) {
       hs.loading = hs.deps.api('/api/hospitals').then((reg) => {
+        checkPair(reg, null);
         hs.reg = reg;
         reg.sites.forEach((s) => hs.sitesById.set(s.fac_id, s));
         reg.cms_entities.forEach((e) => hs.entsByCcn.set(e.ccn, e));
@@ -215,7 +243,11 @@ function createHospitalLayer() {
   }
 
   async function certification() {
-    if (!hs.cert) hs.cert = await hs.deps.api('/api/hospitals/certification');
+    if (!hs.cert) {
+      const cert = await hs.deps.api('/api/hospitals/certification');
+      checkPair(hs.reg, cert);
+      hs.cert = cert;
+    }
     return hs.cert;
   }
 
@@ -281,7 +313,8 @@ function createHospitalLayer() {
     ctx.layer.appendChild(g);
     sizeMarkers();
     renderSummary();
-    $h('hosp-map-note').textContent =
+    const warn = modeWarning(hs.reg);
+    $h('hosp-map-note').textContent = (warn ? `${warn} ` : '') +
       `${plan.drawn.length.toLocaleString('en-US')} hospital sites drawn in this map area. ` +
       'Circles are hospitals; squares are hospital extension sites (clinics, school-based ' +
       'and mobile sites, off-campus emergency departments). ' +
@@ -334,9 +367,11 @@ function createHospitalLayer() {
       `<option value="${hEsc(o.value)}"${o.value === cur ? ' selected' : ''}>` +
       `${hEsc(o.label)} (${o.count.toLocaleString('en-US')})</option>`)).join('');
     const c = reg.reports.counts;
+    const warn = modeWarning(reg);
     section.innerHTML = `
+      ${warn ? `<p class="hosp-fixture" role="alert">${hEsc(warn)}</p>` : ''}
       <div class="hosp-head">
-        <h2 id="hosp-title" tabindex="-1">Hospitals</h2>
+        <h2 id="hosp-title" tabindex="-1">Hospitals${warn ? ' (synthetic test data)' : ''}</h2>
         <p class="muted tiny">${hEsc(reg.dates.nys)} ${hEsc(reg.dates.cms)} ${hEsc(reg.dates.acs)}</p>
       </div>
       <div class="hosp-tabs" role="group" aria-label="Directory">
@@ -588,14 +623,16 @@ function createHospitalLayer() {
     if (!box || hs.pick !== facId) return;
     const date = (r) => (r.effective_date_note === 'conversion_default'
       ? `${hEsc(r.effective_date)} <span class="muted tiny">(system-conversion date; the true date is not available)</span>`
-      : hEsc(r.effective_date || r.effective_date_raw));
+      : r.effective_date_note === 'unparseable'
+        ? `${hEsc(r.effective_date_raw || 'blank')} <span class="muted tiny">(not a date as published)</span>`
+        : hEsc(r.effective_date));
     const beds = rows.filter((r) => r.attribute_type === 'Bed');
     const services = rows.filter((r) => r.attribute_type !== 'Bed');
     box.innerHTML = `
       <p class="muted tiny">${hEsc(hs.reg.definitions.beds)}</p>
-      ${beds.length ? `<table class="hosp-mini"><caption class="visually-hidden">Certified beds by category</caption>
+      ${beds.length ? `<table class="hosp-mini"><caption class="visually-hidden">Certified bed records, one per operating-certificate row, not added up</caption>
         <thead><tr><th scope="col">Bed category</th><th scope="col">Certified beds</th><th scope="col">Sub type</th><th scope="col">Effective</th></tr></thead>
-        <tbody>${beds.map((r) => `<tr><td>${hEsc(r.attribute_value)}</td><td>${r.certified_beds === undefined ? `<span class="muted">not a count (“${hEsc(r.measure_value_raw)}”)</span>` : hEsc(r.certified_beds)}</td><td>${hEsc(r.sub_type)}</td><td>${date(r)}</td></tr>`).join('')}</tbody></table>`
+        <tbody>${beds.map((r) => `<tr><td>${hEsc(r.attribute_value)}</td><td>${r.certified_beds === null || r.certified_beds === undefined ? `<span class="muted">${hEsc(r.count_note || 'not a count')} (“${hEsc(r.measure_value_raw)}”)</span>` : hEsc(r.certified_beds)}</td><td>${hEsc(r.sub_type || 'blank')}</td><td>${date(r)}</td></tr>`).join('')}</tbody></table>`
         : '<p>No certified bed categories are listed for this site.</p>'}
       <details><summary>${services.length} listed service${services.length === 1 ? '' : 's'}</summary>
         <p class="muted tiny">${hEsc(hs.reg.definitions.services)}</p>
@@ -655,7 +692,7 @@ function createHospitalLayer() {
 
   function downloadCsv() {
     const text = sitesCsv(hs.filtered, hs.reg);
-    const name = `hospital-sites-${hs.reg.retrieval_manifest_id}.csv`;
+    const name = `hospital-sites-${hs.reg.data_mode === 'live' ? '' : 'SYNTHETIC-'}${hs.reg.retrieval_manifest_id}.csv`;
     const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url; a.download = name;
@@ -672,7 +709,7 @@ function createHospitalLayer() {
 if (typeof module === 'object' && module.exports) {
   module.exports = {
     filterSites, facets, mapPlan, sitesCsv, hospCsvField, ratingSummary,
-    safeOfficialUrl, careCompareUrl, hEsc, SITE_CSV_COLUMNS,
+    safeOfficialUrl, careCompareUrl, hEsc, SITE_CSV_COLUMNS, checkPair, modeWarning,
   };
 } else if (typeof window !== 'undefined') {
   window.HospitalLayer = createHospitalLayer();

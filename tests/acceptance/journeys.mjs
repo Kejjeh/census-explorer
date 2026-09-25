@@ -540,6 +540,9 @@ async function hospitalLayer(mode, url) {
     'the registry loads whole', `${sites.length} sites, ${reg.cms_entities.length} CMS entities, retrieval ${reg.retrieval_manifest_id}`);
   report.check(reg.reports.checks.every((c) => c.passed), 'every reconciliation check in the loaded registry passed',
     reg.reports.checks.map((c) => c.check_id));
+  report.check(reg.data_mode === 'live' && (await page.$('.hosp-fixture')) === null,
+    'the registry is live data and carries no synthetic-data banner',
+    `data mode ${reg.data_mode}; rules v${reg.rules_version} ${String(reg.rules_sha256).slice(0, 12)}`);
 
   // A county with at least one unlocated site, so "missing location" is exercised.
   const byCounty = {};
@@ -569,6 +572,27 @@ async function hospitalLayer(mode, url) {
   report.check(csvIds.length === expected.length
     && JSON.stringify(csvIds) === JSON.stringify(expected.map((s) => s.fac_id).sort()),
   'the CSV holds exactly the filtered records, unlocated ones included', `${csvIds.length} rows, ${download.suggestedFilename()}`);
+  // Every bed record survives the export whole: the CSV cell parses back to the
+  // registry's records for that site.
+  const header = csv[0].split(',');
+  const bedCol = header.indexOf('certified_bed_records_json');
+  const parseLine = (line) => {
+    const out = []; let cur = ''; let q = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i];
+      if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i += 1; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch;
+    }
+    out.push(cur); return out;
+  };
+  const bedsOk = csv.slice(1).every((line) => {
+    const cells = parseLine(line);
+    const s = expected.find((x) => x.fac_id === cells[0]);
+    return cells.length === header.length && JSON.stringify(JSON.parse(cells[bedCol])) === JSON.stringify(s.certified_beds);
+  });
+  report.check(bedCol >= 0 && bedsOk && !header.some((h) => /total|capacity/i.test(h)),
+    'each CSV row carries its site\'s bed records whole (category, count, sub type, dates), and no total',
+    `${expected.reduce((n, s) => n + s.certified_beds.length, 0)} bed records; ${csvIds.length} rows`);
 
   // An unlocated site: listed, reason shown, not drawn.
   const unlocated = expected.find((s) => s.location_status !== 'valid');
@@ -655,7 +679,7 @@ async function hospitalKeyboard(mode, url) {
   await page.waitForSelector('#hosp-summary', { timeout: 60000 });
   report.check(await page.isChecked('#hosp-toggle'), 'Space turns the layer on');
   presses.search = await tabTo(page, "el.id === 'hosp-q'", 'the hospital search');
-  const name = await page.evaluate(() => HospitalLayer._state.reg.sites.find((s) => s.type_group === 'hospital' && s.certified_bed_categories.length).name);
+  const name = await page.evaluate(() => HospitalLayer._state.reg.sites.find((s) => s.type_group === 'hospital' && s.certified_beds.some((b) => b.beds !== null)).name);
   await page.keyboard.type(name.slice(0, 14));
   await page.waitForTimeout(150);
   presses.county = await tabTo(page, "el.id === 'hosp-county'", 'the county filter');

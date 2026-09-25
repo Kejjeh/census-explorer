@@ -21,6 +21,7 @@ from census_explorer.retrieve import hospitals as R
 from .helpers import offline, temp_root
 
 CFG = R.load_config()
+RULES = R.load_rules()
 
 
 def _csv(header: list[str], rows: list[dict]) -> bytes:
@@ -89,6 +90,12 @@ def default_rows():
         cert_row("0101", "Hospital", "Bed", "Intensive Care", "10", "Permanent", "03/21/1988"),
         cert_row("0101", "Hospital", "Bed", "Medical / Surgical", "120", "Permanent", "12/30/2008"),
         cert_row("0101", "Hospital", "Service", "Emergency Department", "0", "", "01/01/1991"),
+        # Same category, different sub type and date: two records, never merged.
+        cert_row("0101", "Hospital", "Bed", "Intensive Care", "4", "Temporary", "05/01/2020"),
+        # A bed record with no count and an impossible date.
+        cert_row("0101", "Hospital", "Bed", "Pediatric", "", "Permanent", "13/45/2020"),
+        # A bed record whose count is not a whole number.
+        cert_row("0101", "Hospital", "Bed", "Maternity", "n/a", "Permanent", "01/02/2003"),
         cert_row("202", "Hospital Extension Clinic", "Service", "Primary Care", "",
                  "Processing Stations", "01/01/2000"),
         cert_row("404", "Adult Home", "Service", "Adult Home", "0", "", "01/01/2000"),
@@ -193,7 +200,9 @@ class RetrievalChecks(unittest.TestCase):
     def test_complete_retrieval_writes_immutable_cache_and_manifest(self):
         with offline(), temp_root() as root:
             m = fetch(root)
-            self.assertEqual(m.data_mode, "live")
+            # A fake fetcher never makes a live retrieval.
+            self.assertEqual(m.data_mode, "fixture")
+            self.assertEqual(m.inputs["retrieval_config_sha256"], R.canonical_sha256(CFG))
             self.assertEqual(m.verify(root), [])
             self.assertEqual(m.inputs["sources"]["cms_general"]["ny_rows"], 4)
             self.assertEqual(m.inputs["sources"]["nys_general"]["family_rows"], 7)
@@ -286,20 +295,43 @@ class RegistryBuild(unittest.TestCase):
 
     def test_certification_rows_are_preserved_without_fan_out(self):
         self.assertEqual(len(self.reg["sites"]), 5)
-        self.assertEqual(len(self.cert["sites"]["0101"]), 3)
+        self.assertEqual(len(self.cert["sites"]["0101"]), 6)
         c = self.reg["reports"]["counts"]
         self.assertEqual((c["certification_rows_for_sites"], c["certification_rows_other_facilities"],
-                          c["certification_rows_unknown_ids"]), (4, 1, 1))
+                          c["certification_rows_unknown_ids"]), (7, 1, 1))
         self.assertEqual(c["certification_unknown_ids"], ["9999"])
-        beds = self.sites["0101"]["certified_bed_categories"]
-        self.assertEqual([(b["category"], b["beds"]) for b in beds],
-                         [("Intensive Care", 10), ("Medical / Surgical", 120)])
         self.assertNotIn("total_beds", json.dumps(self.reg))
-        rows = {r["attribute_value"]: r for r in self.cert["sites"]["0101"]}
+        rows = {r["attribute_value"]: r for r in self.cert["sites"]["0101"]
+                if r["sub_type"] != "Temporary"}
         self.assertEqual(rows["Medical / Surgical"]["effective_date_note"], "conversion_default")
         self.assertEqual(rows["Intensive Care"]["effective_date"], "1988-03-21")
         self.assertNotIn("certified_beds", rows["Emergency Department"])
         self.assertEqual(rows["Emergency Department"]["measure_value_raw"], "0")
+
+    def test_every_bed_record_is_kept_whole_on_the_site(self):
+        beds = self.sites["0101"]["certified_beds"]
+        key = lambda b: (b["category"], b["sub_type"], b["effective_date_raw"])  # noqa: E731
+        self.assertEqual(sorted(map(key, beds)), sorted([
+            ("Intensive Care", "Permanent", "03/21/1988"),
+            ("Intensive Care", "Temporary", "05/01/2020"),
+            ("Maternity", "Permanent", "01/02/2003"),
+            ("Medical / Surgical", "Permanent", "12/30/2008"),
+            ("Pediatric", "Permanent", "13/45/2020")]))
+        by = {key(b): b for b in beds}
+        icu_p, icu_t = by[("Intensive Care", "Permanent", "03/21/1988")], by[("Intensive Care", "Temporary", "05/01/2020")]
+        self.assertEqual((icu_p["beds"], icu_p["effective_date"]), (10, "1988-03-21"))
+        self.assertEqual((icu_t["beds"], icu_t["effective_date"]), (4, "2020-05-01"))
+        ped = by[("Pediatric", "Permanent", "13/45/2020")]
+        self.assertEqual((ped["beds"], ped["count_note"], ped["effective_date"], ped["effective_date_note"]),
+                         (None, "no count published", None, "unparseable"))
+        mat = by[("Maternity", "Permanent", "01/02/2003")]
+        self.assertEqual((mat["beds"], mat["measure_value_raw"], mat["count_note"]),
+                         (None, "n/a", "published value is not a whole number"))
+        ms = by[("Medical / Surgical", "Permanent", "12/30/2008")]
+        self.assertEqual(ms["effective_date_note"], "conversion_default")
+        for b in beds:
+            self.assertEqual(set(b), {"category", "beds", "measure_value_raw", "count_note", "sub_type",
+                                      "effective_date_raw", "effective_date", "effective_date_note"})
 
     def test_invalid_coordinates_leave_sites_unlocated_with_a_reason(self):
         self.assertEqual(self.sites["0101"]["location_status"], "valid")
@@ -401,7 +433,7 @@ class Normalization(unittest.TestCase):
         self.assertIsNone(H.zip5("1234"))
 
     def test_coordinates(self):
-        b = CFG["ny_bounds"]
+        b = RULES["ny_bounds"]
         self.assertEqual(H.parse_coordinate("0", "0", b)[2], "zero")
         self.assertEqual(H.parse_coordinate("nan", "-73", b)[2], "unparseable")
         self.assertEqual(H.parse_coordinate("42.1", "", b)[2], "incomplete")
@@ -411,30 +443,196 @@ class Normalization(unittest.TestCase):
 
 
 def write_registry(root: Path, data_dir: str = "data/processed") -> tuple[dict, dict]:
-    """Retrieve (fake), build and write a synthetic registry under root."""
-    from census_explorer import provenance
+    """Retrieve (fake, so fixture), build and write a synthetic registry under root."""
     fetch(root)
     reg, cert = H.build_registry(H.load_inputs(root, None, CFG), CFG, county_shapes=COUNTIES)
-    out = root / data_dir / "hospitals"
-    provenance.write_json(out / "registry.json", reg)
-    provenance.write_json(out / "certification.json", cert)
+    H.write_outputs(root / data_dir / "hospitals", reg, cert)
     return reg, cert
 
 
+def build_census(root: Path, mode: str):
+    """The end-to-end fixture census build, written with the given data mode."""
+    from census_explorer import dataset, metadata
+    from tests.test_end_to_end import stage_project
+    cfg = stage_project(root)
+    release = cfg.release("testrel")
+    meta = metadata.load_release_metadata(root, release, cfg.all_tables())
+    result = dataset.build(root, cfg, release, meta, ["county"], "summary-file")
+    dataset.add_cross_table_diagnostics(root, release, result, "summary-file")
+    dataset.attach_geography(root, cfg, release, result, ["county"])
+    dataset.write_processed(root, cfg, release, meta, result, "fixture-manifest",
+                            mode, "summary-file")
+    return cfg
+
+
+class SiteFieldConflicts(unittest.TestCase):
+    """Repeated HFIS rows that disagree on a site-level field stop the build."""
+
+    def _build(self, rows):
+        with offline(), temp_root() as root:
+            fetch(root, rows=rows)
+            return H.build_registry(H.load_inputs(root, None, CFG), CFG, county_shapes=COUNTIES)
+
+    def _conflicting(self, field, value, reverse):
+        rows = default_rows()
+        bad = dict(rows["nys_general"][1])
+        bad[field] = value
+        rows["nys_general"][1] = bad
+        if reverse:
+            rows["nys_general"].reverse()
+        return rows
+
+    def test_conflicting_address_fails_in_either_row_order(self):
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                with self.assertRaises(H.RegistryError) as ctx:
+                    self._build(self._conflicting("Facility Address 1", "999 Wrong Road", reverse))
+                msg = str(ctx.exception)
+                self.assertIn("fac_id 0101 Facility Address 1", msg)
+                self.assertIn("999 Wrong Road", msg)
+                self.assertIn("100 Main St", msg)
+
+    def test_conflicting_coordinates_county_or_main_site_fail(self):
+        for field, value in (("Facility Latitude", "43.1"), ("Facility County Code", "44"),
+                             ("Facility County", "Seneca"), ("Main Site Facility ID", "202"),
+                             ("Facility Name", "Other name")):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(H.RegistryError, f"fac_id 0101 {field}"):
+                    self._build(self._conflicting(field, value, False))
+
+    def test_legitimate_multiplicity_still_builds_and_ignores_row_order(self):
+        reg1, cert1 = self._build(default_rows())
+        rows = default_rows()
+        for key in rows:
+            rows[key].reverse()
+        reg2, cert2 = self._build(rows)
+        strip = lambda r: {k: v for k, v in r.items() if k not in ("built_at", "sources")}  # noqa: E731
+        self.assertEqual(json.dumps(strip(reg1), sort_keys=True), json.dumps(strip(reg2), sort_keys=True))
+        self.assertEqual(cert1["sites"], cert2["sites"])
+        s = {x["fac_id"]: x for x in reg1["sites"]}
+        self.assertEqual(s["303"]["ownership_types"], ["County", "Municipality"])
+        self.assertEqual(s["0101"]["cooperators"], ["Coop A", "Coop B"])
+
+
+class TransformationProvenance(unittest.TestCase):
+    """No reinterpretation of a retrieval under the same purported provenance."""
+
+    def test_changed_retrieval_config_is_refused_with_guidance(self):
+        import copy
+        with offline(), temp_root() as root:
+            fetch(root)
+            fam = copy.deepcopy(CFG)
+            fam["hospital_family"]["main_site_types"].append("Adult Home")
+            src = copy.deepcopy(CFG)
+            src["sources"]["cms_general"]["count_url"] += "&x=1"
+            for changed in (fam, src):
+                with self.assertRaisesRegex(H.RegistryError, "has changed since retrieval.*hospitals fetch"):
+                    H.load_inputs(root, None, changed)
+
+    def test_unpinned_retrieval_is_refused(self):
+        from census_explorer import provenance
+        with offline(), temp_root() as root:
+            m = fetch(root)
+            path = root / "data/manifests" / f"{m.manifest_id}.json"
+            doc = json.loads(path.read_text())
+            del doc["inputs"]["retrieval_config_sha256"]
+            provenance.write_json(path, doc)
+            with self.assertRaisesRegex(H.RegistryError, "does not record the retrieval configuration"):
+                H.load_inputs(root, None, CFG)
+
+    def test_changed_rules_are_recorded_not_invisible(self):
+        import copy
+        with offline(), temp_root() as root:
+            fetch(root)
+            inputs = H.load_inputs(root, None, CFG)
+            base, _ = H.build_registry(inputs, CFG, rules=RULES, county_shapes=COUNTIES)
+            bounds = copy.deepcopy(RULES)
+            bounds["ny_bounds"]["min_lat"] = 45
+            moved, mcert = H.build_registry(inputs, CFG, rules=bounds, county_shapes=COUNTIES)
+            alias = copy.deepcopy(RULES)
+            del alias["county_name_aliases"]["Saint Lawrence"]
+            unaliased, _ = H.build_registry(inputs, CFG, rules=alias, county_shapes=COUNTIES)
+        self.assertEqual(base["rules_sha256"], R.canonical_sha256(RULES))
+        self.assertEqual(base["rules_version"], RULES["rules_version"])
+        for other in (moved, unaliased):
+            self.assertNotEqual(other["rules_sha256"], base["rules_sha256"])
+            self.assertEqual(other["retrieval_manifest_id"], base["retrieval_manifest_id"])
+        self.assertEqual(mcert["rules_sha256"], moved["rules_sha256"])
+        # The changes really change the interpretation, and it is attributable.
+        site = lambda r, f: next(s for s in r["sites"] if s["fac_id"] == f)  # noqa: E731
+        self.assertEqual(site(moved, "0101")["location_status"], "outside_new_york")
+        self.assertEqual(site(unaliased, "505")["county_crosswalk"], "unmatched")
+        with temp_root() as out:
+            idx = H.write_outputs(out, moved, mcert)
+            self.assertEqual(idx["rules_sha256"], moved["rules_sha256"])
+
+    def test_rules_hash_ignores_line_endings_and_key_order(self):
+        text = R.RULES_PATH.read_text("utf-8")
+        a = json.loads(text)
+        b = json.loads(text.replace("\n", "\r\n"))
+        self.assertEqual(R.canonical_sha256(a), R.canonical_sha256(dict(reversed(list(b.items())))))
+
+
+class PairIntegrity(unittest.TestCase):
+    """Consumers check both registry files against their index and each other."""
+
+    @classmethod
+    def setUpClass(cls):
+        with offline(), temp_root() as root:
+            fetch(root)
+            cls.reg, cls.cert = H.build_registry(H.load_inputs(root, None, CFG), CFG,
+                                                 county_shapes=COUNTIES)
+
+    def test_round_trip(self):
+        with temp_root() as out:
+            H.write_outputs(out, self.reg, self.cert)
+            index, reg, cert = H.read_outputs(out)
+            self.assertEqual(index["data_mode"], "fixture")
+            self.assertEqual(json.loads(reg)["rules_sha256"], index["rules_sha256"])
+
+    def test_independently_modified_file_is_refused(self):
+        with temp_root() as out:
+            H.write_outputs(out, self.reg, self.cert)
+            path = out / "certification.json"
+            path.write_bytes(path.read_bytes().replace(b"Intensive Care", b"Intensive Kare"))
+            with self.assertRaisesRegex(H.RegistryError, "certification.json does not match its index"):
+                H.read_outputs(out)
+
+    def test_consistently_rehashed_but_mismatched_pair_is_refused(self):
+        for key, value in (("retrieval_manifest_id", "hospitals-other"), ("rules_sha256", "0" * 64),
+                           ("data_mode", "live"), ("schema_version", 2)):
+            with self.subTest(key=key), temp_root() as out:
+                H.write_outputs(out, self.reg, {**self.cert, key: value})
+                # write_outputs indexes whatever it is given, so the index is
+                # consistent with the bytes; the pair itself must still agree.
+                with self.assertRaises(H.RegistryError):
+                    H.read_outputs(out)
+
+    def test_unknown_mode_and_missing_index_are_refused(self):
+        with temp_root() as out:
+            H.write_outputs(out, {**self.reg, "data_mode": "demo"}, {**self.cert, "data_mode": "demo"})
+            with self.assertRaisesRegex(H.RegistryError, "unknown data mode"):
+                H.read_outputs(out)
+            (out / "index.json").unlink()
+            with self.assertRaisesRegex(H.RegistryError, "no index.json"):
+                H.read_outputs(out)
+
+
 class ServiceAndStaticSite(unittest.TestCase):
-    """The layer is optional: without it the census build is unchanged."""
+    """The layer is optional: without it the census build is unchanged.
+
+    Both the census build and the hospital registry here are fixture data,
+    so the pair may be published together, labelled."""
 
     @classmethod
     def setUpClass(cls):
         import re
         from census_explorer import site
-        from tests.test_end_to_end import build, stage_project
         cls._tmp = temp_root()
         cls.root = cls._tmp.__enter__()
         cls._off = offline()
         cls._off.__enter__()
-        cls.cfg = stage_project(cls.root)
-        build(cls.root, cls.cfg)
+        cls.cfg = build_census(cls.root, "fixture")
         quiet = lambda *a: None  # noqa: E731
         cls.plain = cls.root / "plain"
         site.build(cls.root, cls.plain, "testrel", base_path="/x/", log=quiet)
@@ -473,34 +671,56 @@ class ServiceAndStaticSite(unittest.TestCase):
                 continue
             self.assertEqual(path.read_bytes(), (self.withh / rel).read_bytes(), rel)
 
-    def test_published_registry_is_the_built_one_and_names_its_retrieval(self):
+    def test_published_provenance_names_retrieval_rules_and_mode(self):
         pub = json.loads((self.withh / "data/hospitals/registry.json").read_text())
         self.assertEqual(len(pub["sites"]), len(self.reg["sites"]))
-        man = json.loads((self.withh / "data/manifest.json").read_text())
-        self.assertEqual(man["hospitals"]["retrieval_manifest_id"], self.reg["retrieval_manifest_id"])
-        self.assertEqual(man["hospitals"]["sites"], 5)
+        man = json.loads((self.withh / "data/manifest.json").read_text())["hospitals"]
+        self.assertEqual(man["retrieval_manifest_id"], self.reg["retrieval_manifest_id"])
+        self.assertEqual(man["sites"], 5)
+        self.assertEqual((man["data_mode"], man["rules_sha256"], man["rules_version"]),
+                         ("fixture", R.canonical_sha256(RULES), RULES["rules_version"]))
+        self.assertEqual(man["retrieval_config_sha256"], R.canonical_sha256(CFG))
+        self.assertEqual(pub["data_mode"], "fixture")
         # No path on the build machine is published.
         self.assertNotIn(str(self.root), (self.withh / "data/hospitals/registry.json").read_text())
 
-    def test_mismatched_registry_and_certification_are_refused(self):
-        from census_explorer import provenance, site
+    def test_live_census_with_fixture_hospitals_is_refused(self):
+        from census_explorer import site
+        with temp_root() as root:
+            build_census(root, "live")
+            write_registry(root)
+            with self.assertRaisesRegex(ValueError, "'fixture' data but the census build is 'live'"):
+                site.build(root, root / "site", "testrel", log=lambda *a: None,
+                           hospitals_dir=root / "data/processed/hospitals")
+            self.assertFalse((root / "site").exists())
+
+    def test_tampered_registry_is_refused_by_the_site_build(self):
+        from census_explorer import site
         bad = self.root / "bad"
-        provenance.write_json(bad / "registry.json", self.reg)
-        provenance.write_json(bad / "certification.json", {**self.cert, "retrieval_manifest_id": "other"})
-        with self.assertRaisesRegex(ValueError, "different retrievals"):
+        H.write_outputs(bad, self.reg, self.cert)
+        (bad / "registry.json").write_bytes((bad / "registry.json").read_bytes() + b" ")
+        with self.assertRaisesRegex(H.RegistryError, "does not match its index"):
             site.build(self.root, self.root / "badsite", "testrel", log=lambda *a: None,
                        hospitals_dir=bad)
 
-    def test_local_service_serves_the_built_files_and_explains_their_absence(self):
+    def test_local_service_serves_verified_files_and_explains_their_absence(self):
         from census_explorer import server
         st = server.ServiceState(self.root)
         body = st.hospital_bytes("registry")
-        self.assertEqual(body, (self.root / "data/processed/hospitals/registry.json").read_bytes())
+        path = self.root / "data/processed/hospitals/registry.json"
+        self.assertEqual(body, path.read_bytes())
         with self.assertRaises(KeyError):
             st.hospital_bytes("../project")
         missing = server.ServiceState(self.root, "data/fixture-processed")
         with self.assertRaisesRegex(FileNotFoundError, "hospitals fetch"):
             missing.hospital_bytes("registry")
+        original = path.read_bytes()
+        try:
+            path.write_bytes(original.replace(b'"fixture"', b'"live"', 1))
+            with self.assertRaisesRegex(ValueError, "does not match its index"):
+                st.hospital_bytes("certification")
+        finally:
+            path.write_bytes(original)
 
 
 class BrowserLogic(unittest.TestCase):

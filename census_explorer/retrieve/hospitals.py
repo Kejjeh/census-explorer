@@ -36,6 +36,7 @@ from ..http_client import fetch as _default_fetch
 from ..redact import RedactedError
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "hospitals.json"
+RULES_PATH = CONFIG_PATH.with_name("hospital_rules.json")
 RAW_ROOT = Path("data/raw/hospitals")
 MANIFEST_PREFIX = "hospitals-"
 
@@ -45,8 +46,22 @@ class SourceCheckFailed(RedactedError):
 
 
 def load_config(path: Path | None = None) -> dict:
+    """The retrieval configuration: sources, documents, hospital-family types."""
     with open(path or CONFIG_PATH, "r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def load_rules(path: Path | None = None) -> dict:
+    """The transformation rules: aliases, bounds, certification notes, links."""
+    with open(path or RULES_PATH, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def canonical_sha256(doc: Any) -> str:
+    """SHA-256 of canonical JSON, so the same content hashes the same on every
+    platform whatever the file's line endings or key order."""
+    return provenance.sha256_bytes(
+        json.dumps(doc, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
 # -- parsing helpers shared with the offline build -------------------------
@@ -164,11 +179,18 @@ class _Run:
             cache_path=(self.final_rel / name).as_posix(), notes=notes))
 
 
-def fetch_all(repo_root: Path, *, fetcher: Callable = _default_fetch,
+def fetch_all(repo_root: Path, *, fetcher: Callable | None = None,
               config: dict | None = None, stamp: str | None = None,
               log=print) -> provenance.Manifest:
-    """Retrieve every hospital source, check it, and write cache + manifest."""
+    """Retrieve every hospital source, check it, and write cache + manifest.
+
+    Only the real network fetcher produces a ``live`` retrieval. Any other
+    fetcher (a test double) produces ``fixture``, whatever it serves: a
+    retrieval is never called live because it went through the same code.
+    """
     repo_root = Path(repo_root)
+    data_mode = "live" if fetcher is None else "fixture"
+    fetcher = fetcher or _default_fetch
     cfg = config or load_config()
     stamp = stamp or provenance.utc_now().replace(":", "").replace("-", "")
     run = _Run(repo_root, stamp, fetcher, log)
@@ -206,11 +228,12 @@ def fetch_all(repo_root: Path, *, fetcher: Callable = _default_fetch,
         "Hospital Explorer phase 1 sources: CMS Hospital General Information and "
         "Footnote Crosswalk, NYSDOH HFIS General and Certification, NYS ITS "
         "Locality Hierarchy, and their documentation.",
-        "live", repo_root)
+        data_mode, repo_root)
     for rec in run.records:
         manifest.add(rec)
-    inputs["config_sha256"] = provenance.sha256_bytes(
-        json.dumps(cfg, sort_keys=True).encode("utf-8"))
+    # The retrieval configuration this cache was checked against. A build
+    # refuses the retrieval if the configuration has changed since.
+    inputs["retrieval_config_sha256"] = canonical_sha256(cfg)
     manifest.inputs = inputs
     path = repo_root / "data" / "manifests" / f"{manifest.manifest_id}.json"
     manifest.save(path)

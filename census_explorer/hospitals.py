@@ -66,6 +66,7 @@ MATCH_RULE = ("exact equality of the normalized street address and the "
               "only and play no part in the rule.")
 
 CMS_RATING_VALUES = {"1", "2", "3", "4", "5"}
+DATA_MODES = {"live", "fixture"}
 
 
 class RegistryError(RedactedError):
@@ -187,6 +188,24 @@ def load_inputs(repo_root: Path, manifest_id: str | None, cfg: dict) -> dict:
         raise RegistryError(
             "the hospital retrieval does not match its manifest, so nothing was "
             "built: " + "; ".join(problems))
+    if manifest.data_mode not in DATA_MODES:
+        raise RegistryError(
+            f"manifest {manifest_id} has data mode {manifest.data_mode!r}; only "
+            f"{sorted(DATA_MODES)} are understood")
+    pinned = (manifest.inputs or {}).get("retrieval_config_sha256")
+    current = retrieve.canonical_sha256(cfg)
+    if pinned is None:
+        raise RegistryError(
+            f"retrieval {manifest_id} does not record the retrieval configuration it "
+            "was checked against, so it cannot be interpreted reproducibly. Run the "
+            "explicit network step again: python -m census_explorer.cli hospitals fetch")
+    if pinned != current:
+        raise RegistryError(
+            f"config/hospitals.json has changed since retrieval {manifest_id} "
+            f"(pinned {pinned[:12]}, now {current[:12]}). Its sources, headers and "
+            "hospital-family types were checked against the provider under the "
+            "pinned version. Restore that version, or retrieve again under the new "
+            "one: python -m census_explorer.cli hospitals fetch")
     by_id = {r["artifact_id"]: r for r in manifest.records}
     parsed: dict[str, Any] = {"manifest": manifest, "records": by_id}
     for key, src in cfg["sources"].items():
@@ -228,11 +247,17 @@ SITE_FIELDS = {
 }
 
 
-def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None = None,
+def build_registry(inputs: dict, cfg: dict, *, rules: dict | None = None,
+                   county_shapes: list[dict] | None = None,
                    shapes_source: dict | None = None) -> tuple[dict, dict]:
-    """``county_shapes``: GeoJSON-like features whose properties carry the
-    Census ``NAME`` and ``GEOID`` of each New York county."""
-    """Return (registry, certification). Raises if any reconciliation fails."""
+    """Return (registry, certification). Raises if any reconciliation fails.
+
+    ``cfg`` is the retrieval configuration the manifest pinned; ``rules`` the
+    transformation rules (``config/hospital_rules.json``), whose version and
+    hash every output records. ``county_shapes``: GeoJSON-like features whose
+    properties carry the Census ``NAME`` and ``GEOID`` of each NY county.
+    """
+    rules = rules if rules is not None else retrieve.load_rules()
     fam = cfg["hospital_family"]
     main_types = set(fam["main_site_types"])
     operated_types = set(fam["hospital_operated_types"])
@@ -286,8 +311,8 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
     locality_duplicate_fips = {
         code: sorted(r["County Name"] for r in locality if r["County FIPS"] == code)
         for code, n in loc_fips_counts.items() if n > 1}
-    aliases = {k: v for k, v in cfg["county_name_aliases"].items() if k != "note"}
-    bounds = cfg["ny_bounds"]
+    aliases = {k: v for k, v in rules["county_name_aliases"].items() if k != "note"}
+    bounds = rules["ny_bounds"]
 
     sites: list[dict] = []
     conflicts: list[dict] = []
@@ -305,12 +330,9 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
             site[field] = rows[0][col]
         site["fac_id_is_numeric_text"] = bool(FAC_ID_RE.match(fac_id))
         site["type_group"] = "hospital" if site["type"] in main_types else "extension"
-        operators = []
-        for r in rows:
-            op = {"name": r["Operator Name"], "city": r["Operator City"]}
-            if op not in operators:
-                operators.append(op)
-        site["operators"] = operators
+        # Sorted, so no output depends on the order of rows in the source file.
+        site["operators"] = [dict(zip(("name", "city"), op)) for op in sorted(
+            {(r["Operator Name"], r["Operator City"]) for r in rows})]
         site["cooperators"] = sorted({r["Cooperator Name"] for r in rows if r["Cooperator Name"]})
         owners = sorted({r["Ownership Type"] for r in rows if r["Ownership Type"]})
         site["ownership_types"] = owners
@@ -352,6 +374,20 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
                 "in_other_county")
         sites.append(site)
 
+    # Fail closed: a site whose repeated rows disagree on any site-level field
+    # (identity, address, county, coordinates, main site, certificate) has no
+    # authoritative value, and choosing one would make every derived field and
+    # candidate depend on row order. Operators, cooperators and ownership
+    # types legitimately differ between rows and are kept as lists instead.
+    if conflicts:
+        shown = "; ".join(f"fac_id {c['fac_id']} {c['field']}: {c['values']}"
+                          for c in conflicts[:10])
+        raise RegistryError(
+            f"{len(conflicts)} site-level field conflict(s) across repeated HFIS "
+            f"rows, so no registry was built: {shown}"
+            + (" …" if len(conflicts) > 10 else "")
+            + ". Resolve them with NYSDOH or exclude the sites by a reviewed rule; "
+            "no value is chosen automatically.")
     by_id = {s["fac_id"]: s for s in sites}
     check("one_site_per_fac_id", len(by_id) == len(sites) == len(rows_by_id),
           f"{len(sites)} sites from {len(fam_rows)} rows ({multi_row} facility IDs "
@@ -377,7 +413,7 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
 
     # ---- certification (one-to-many, kept apart) -----------------------
     cert_all = inputs["nys_certification"]
-    conv = cfg["certification"]["conversion_default_date"]
+    conv = rules["certification"]["conversion_default_date"]
     certification: dict[str, list[dict]] = defaultdict(list)
     general_ids = set(fac_types_all)
     outside_family = orphan = 0
@@ -403,8 +439,13 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
             "effective_date_note": ("conversion_default" if eff == conv else
                                     "unparseable" if eff is None else ""),
         }
-        if kind == "Bed" and re.fullmatch(r"\d+", r["Measure Value"] or ""):
-            row["certified_beds"] = int(r["Measure Value"])
+        if kind == "Bed":
+            mv = (r["Measure Value"] or "").strip()
+            whole = re.fullmatch(r"\d+", mv)
+            row["certified_beds"] = int(mv) if whole else None
+            row["count_note"] = ("" if whole else
+                                 "no count published" if not mv else
+                                 "published value is not a whole number")
         certification[fid].append(row)
     kept = sum(len(v) for v in certification.values())
     check("certification_rows_partition", kept + outside_family + orphan == len(cert_all),
@@ -413,17 +454,23 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
     check("certification_rows_match_api", len(cert_all) == msrc["nys_certification"]["rows"],
           f"{len(cert_all)} rows; provider count {msrc['nys_certification']['api_count']}")
     for fid, rows in certification.items():
-        rows.sort(key=lambda x: (x["attribute_type"], x["attribute_value"], x["sub_type"]))
+        rows.sort(key=lambda x: (x["attribute_type"], x["attribute_value"], x["sub_type"],
+                                 x["effective_date_raw"], x["measure_value_raw"]))
     dup_keys = [k for k, n in Counter(
         (fid, r["attribute_type"], r["attribute_value"], r["sub_type"])
         for fid, rows in certification.items() for r in rows).items() if n > 1]
     for s in sites:
         rows = certification.get(s["fac_id"], [])
         s["certification_rows"] = len(rows)
-        beds = [r for r in rows if r["attribute_type"] == "Bed" and "certified_beds" in r]
-        s["certified_bed_categories"] = [
+        # Every bed record, whole: category, count (or why there is none), sub
+        # type and both forms of the date. Records are never added together.
+        s["certified_beds"] = [
             {"category": r["attribute_value"], "beds": r["certified_beds"],
-             "sub_type": r["sub_type"]} for r in beds]
+             "measure_value_raw": r["measure_value_raw"], "count_note": r["count_note"],
+             "sub_type": r["sub_type"], "effective_date_raw": r["effective_date_raw"],
+             "effective_date": r["effective_date"],
+             "effective_date_note": r["effective_date_note"]}
+            for r in rows if r["attribute_type"] == "Bed"]
         s["listed_services"] = sum(1 for r in rows if r["attribute_type"] == "Service")
     check("sites_unchanged_by_certification", len(sites) == len(by_id),
           "certification rows are held per site, never joined onto site rows")
@@ -547,6 +594,9 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
         "built_at": provenance.utc_now(),
         "retrieval_manifest_id": manifest.manifest_id,
         "retrieval_code_revision": manifest.code_revision,
+        "retrieval_config_sha256": manifest.inputs["retrieval_config_sha256"],
+        "rules_version": rules.get("rules_version"),
+        "rules_sha256": retrieve.canonical_sha256(rules),
         "sources": {k: src_block(k) for k in cfg["sources"]},
         "county_shapes": shapes_source,
         "dates": {
@@ -568,10 +618,11 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
             "measure_value": cert_cols.get("Measure Value", ""),
             "sub_type": cert_cols.get("Sub Type", ""),
             "effective_date": cert_cols.get("Effective Date", ""),
-            "conversion_note": cfg["certification"]["conversion_note"],
-            "beds": ("Certified beds by category as listed on the operating "
-                     "certificate. Not staffed, available or occupied beds. "
-                     "Categories are listed separately and never added up."),
+            "conversion_note": rules["certification"]["conversion_note"],
+            "beds": ("Certified beds, one record per operating-certificate row, with "
+                     "its sub type and effective date. Not staffed, available or "
+                     "occupied beds, and not current capacity. Records are listed "
+                     "separately and never added up."),
             "services": ("Services listed on the operating certificate. The "
                          "published measure value for services is not shown as a "
                          "count: it is 0 on most service rows, which does not fit "
@@ -585,7 +636,7 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
             "match_rule": MATCH_RULE,
             "address_abbreviations": ADDRESS_ABBREVIATIONS,
         },
-        "links": {k: v for k, v in cfg["links"].items()},
+        "links": {k: v for k, v in rules["links"].items()},
         "footnotes": footnotes,
         "sites": sites,
         "cms_entities": entities,
@@ -667,9 +718,11 @@ def build_registry(inputs: dict, cfg: dict, *, county_shapes: list[dict] | None 
     }
     cert_doc = {
         "schema_version": REGISTRY_SCHEMA,
+        "data_mode": manifest.data_mode,
         "retrieval_manifest_id": manifest.manifest_id,
+        "rules_sha256": registry["rules_sha256"],
         "note": registry["definitions"]["beds"] + " " + registry["definitions"]["services"],
-        "conversion_note": cfg["certification"]["conversion_note"],
+        "conversion_note": rules["certification"]["conversion_note"],
         "sites": {k: certification[k] for k in sorted(certification)},
     }
     return registry, cert_doc
@@ -743,19 +796,83 @@ def build(repo_root: Path, manifest_id: str | None = None,
     registry, cert = build_registry(inputs, cfg, county_shapes=shapes,
                                     shapes_source=shapes_source)
     registry["code_revision"] = provenance.code_revision(repo_root)
-    out = Path(out_dir) if out_dir else repo_root / REGISTRY_DIR
-    out.mkdir(parents=True, exist_ok=True)
-    provenance.write_json(out / "registry.json", registry)
-    provenance.write_json(out / "certification.json", cert)
-    log(f"hospital registry written to {out}")
+    write_outputs(Path(out_dir) if out_dir else repo_root / REGISTRY_DIR, registry, cert)
+    log(f"hospital registry written to {Path(out_dir) if out_dir else REGISTRY_DIR}")
     return registry
+
+
+OUTPUT_FILES = ("registry.json", "certification.json")
+
+
+def write_outputs(out: Path, registry: dict, cert: dict) -> dict:
+    """Write both documents and an index that pins them together.
+
+    ``index.json`` names the retrieval, the data mode, the rules and the
+    SHA-256 of both files. Every consumer checks it (``read_outputs``), so a
+    registry and a certification file changed or mixed independently are
+    refused rather than shown side by side.
+    """
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    digests = {"registry.json": provenance.write_json(out / "registry.json", registry),
+               "certification.json": provenance.write_json(out / "certification.json", cert)}
+    index = {
+        "schema_version": REGISTRY_SCHEMA,
+        "retrieval_manifest_id": registry["retrieval_manifest_id"],
+        "data_mode": registry["data_mode"],
+        "rules_version": registry["rules_version"],
+        "rules_sha256": registry["rules_sha256"],
+        "retrieval_config_sha256": registry["retrieval_config_sha256"],
+        "files": digests,
+    }
+    provenance.write_json(out / "index.json", index)
+    return index
+
+
+def check_pair(index: dict, registry: dict, cert: dict) -> None:
+    """The parsed documents agree with each other and with their index."""
+    for what, doc in (("index", index), ("registry", registry), ("certification", cert)):
+        if doc.get("schema_version") != REGISTRY_SCHEMA:
+            raise RegistryError(f"hospital {what} has schema version "
+                                f"{doc.get('schema_version')!r}, expected {REGISTRY_SCHEMA}")
+        if doc.get("data_mode") not in DATA_MODES:
+            raise RegistryError(f"hospital {what} has unknown data mode {doc.get('data_mode')!r}")
+    for key in ("retrieval_manifest_id", "data_mode", "rules_sha256"):
+        values = {index.get(key), registry.get(key), cert.get(key)}
+        if len(values) != 1:
+            raise RegistryError(f"hospital registry files disagree on {key}: {sorted(map(str, values))}")
+
+
+def read_outputs(out: Path) -> tuple[dict, bytes, bytes]:
+    """Read a built registry, verifying every byte against its index."""
+    out = Path(out)
+    index_path = out / "index.json"
+    if not index_path.is_file():
+        raise RegistryError(
+            f"{out} has no index.json, so its files cannot be checked; rebuild with: "
+            "python -m census_explorer.cli hospitals build")
+    index = json.loads(index_path.read_text("utf-8"))
+    blobs = {}
+    for name in OUTPUT_FILES:
+        path = out / name
+        if not path.is_file():
+            raise RegistryError(f"{out} is missing {name}")
+        body = path.read_bytes()
+        if provenance.sha256_bytes(body) != (index.get("files") or {}).get(name):
+            raise RegistryError(
+                f"{out}/{name} does not match its index; it was changed after the "
+                "build. Rebuild with: python -m census_explorer.cli hospitals build")
+        blobs[name] = body
+    check_pair(index, json.loads(blobs["registry.json"]), json.loads(blobs["certification.json"]))
+    return index, blobs["registry.json"], blobs["certification.json"]
 
 
 def summary_lines(registry: dict) -> list[str]:
     r = registry["reports"]
     c = r["counts"]
     lines = [
-        f"retrieval manifest: {registry['retrieval_manifest_id']}",
+        f"retrieval manifest: {registry['retrieval_manifest_id']} ({registry['data_mode']}); "
+        f"rules v{registry['rules_version']} {registry['rules_sha256'][:12]}",
         f"CMS Hospital General Information: {c['cms_rows']} rows, {c['cms_ny_rows']} in New York",
         f"NYS HFIS General: {c['nys_general_rows']} rows, {c['hospital_family_rows']} in the "
         f"hospital family -> {c['hospital_family_sites']} sites "

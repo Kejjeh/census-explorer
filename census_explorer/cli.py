@@ -451,11 +451,13 @@ def _dispatch(args, root: Path, cfg: config_mod.ProjectConfig, log) -> int:
             for line in hospitals_mod.summary_lines(registry):
                 log(line)
             return 0
-        path = root / hospitals_mod.REGISTRY_DIR / "registry.json"
-        if not path.is_file():
+        out = root / hospitals_mod.REGISTRY_DIR
+        if not (out / "registry.json").is_file():
             log("no hospital registry built; run: python -m census_explorer.cli hospitals build")
             return 1
-        registry = provenance.read_json(path)
+        index, reg_bytes, _cert = hospitals_mod.read_outputs(out)
+        registry = json.loads(reg_bytes)
+        log(f"index: {json.dumps(index)}")
         for line in hospitals_mod.summary_lines(registry):
             log(line)
         log(json.dumps(registry["reports"], indent=2))

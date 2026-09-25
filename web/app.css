@@ -663,6 +663,8 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
 .hosp-mark[data-pick="true"] { fill: var(--pick); stroke: #ffffff; }
 .hospitals { margin-top: var(--s5); border-top: 1px solid var(--line); padding-top: var(--s4); }
 .hosp-head h2 { margin: 0 0 var(--s1); }
+.hosp-fixture { margin: 0 0 var(--s3); padding: var(--s2) var(--s3); font-weight: 700;
+  color: var(--warn); background: var(--warn-soft); border: 2px solid var(--warn); border-radius: var(--radius); }
 .hosp-tabs { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s3) 0; }
 .hosp-tabs .chip { min-height: 28px; font-size: 13px; }
 .hosp-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
