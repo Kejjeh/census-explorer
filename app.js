@@ -434,7 +434,36 @@ function applyStaticMode() {
     '</ul></details>';
 }
 
+/**
+ * Skip links move focus; they do not navigate. Following the href would
+ * replace the address's #view= with #stage or #result-actions, and a shared
+ * view reloaded from that address would be lost. "The table" means its
+ * current row stop (one per table), or its heading when it has no rows.
+ * Disabled actions stay disabled: the group takes focus, and Tab from it
+ * moves only to the actions that are enabled.
+ */
+function wireSkipLinks() {
+  document.querySelectorAll('a[data-skip]').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      const where = a.dataset.skip;
+      let target = null;
+      if (where === 'table') {
+        target = $('table-body').querySelector('tr[tabindex="0"]') || $('table-title');
+      } else if (where === 'actions') {
+        target = $('result-actions');
+      } else {
+        target = $(where);
+      }
+      if (!target) return;
+      e.preventDefault();
+      target.focus();
+      target.scrollIntoView({ block: 'nearest' });
+    });
+  });
+}
+
 function wireControls() {
+  wireSkipLinks();
   document.querySelectorAll('.level-switch button').forEach((b) => {
     b.addEventListener('click', () => setLevel(b.dataset.level));
   });
@@ -571,6 +600,7 @@ async function setScope(code, areas = []) {
   renderLevelSwitch();
   await loadBenchmarks();
   await refresh();
+  keepFocusInView();
 }
 
 /**
@@ -639,6 +669,20 @@ function enterLevel(level, scope) {
   renderComparePanel();
 }
 
+/**
+ * Many view changes rebuild the panel that held the pressed control (a
+ * place card's "Explore", "Show only these two", Reset). When that control
+ * is gone, focus would fall back to the top of the page; put it on the line
+ * that says what is now shown instead.
+ */
+function keepFocusInView() {
+  const el = document.activeElement;
+  // Gone includes still in the document but hidden, as a dismissed panel is.
+  if (!el || el === document.body || !el.isConnected || !el.getClientRects().length) {
+    $('scope-bar').focus();
+  }
+}
+
 /** Open one county's census tracts, from anywhere. */
 async function exploreCounty(county) {
   const code = `county:${county}`;
@@ -647,6 +691,7 @@ async function exploreCounty(county) {
   fitMap();
   await loadBenchmarks();
   await refresh();
+  keepFocusInView();
 }
 
 async function setLevel(level) {
@@ -867,6 +912,10 @@ function renderPlaceResults() {
           state.placeQuery = '';
           closePlaceResults();
           selectArea(a.geoid, { focus: true, reveal: true });
+          // The list that held focus is gone. Put focus on what was chosen,
+          // not back on the page, so a keyboard user lands on its details.
+          const name = $('pc-name');
+          if (name) name.focus();
         });
       }
       li.appendChild(b);
@@ -1065,7 +1114,7 @@ function showBlocked(title, lines, opts = {}) {
     again.type = 'button';
     again.className = 'btn';
     again.textContent = 'Try again';
-    again.addEventListener('click', () => refresh());
+    again.addEventListener('click', async () => { await refresh(); keepFocusInView(); });
     el.appendChild(again);
   }
 }
@@ -1176,7 +1225,7 @@ function renderStarters(opts = {}) {
   $('starters-outro').textContent =
     'These are starting points, not findings. Change the place with the ' +
     `search above the map, or choose any of the ${levelInfo().measure_count} ` +
-    'measures in the list on the left.';
+    'measures in the measure list.';
   host.textContent = '';
   available.forEach((starter) => {
     const li = document.createElement('li');
@@ -1317,6 +1366,7 @@ async function setAreas(areas) {
   state.page = 0;
   await loadBenchmarks();
   await refresh();
+  keepFocusInView();
 }
 
 /* ------------------------------------------------------------------- map */
@@ -1977,7 +2027,7 @@ function renderPlaceCard() {
   const geoid = state.pick;
   const v = state.values?.[geoid] || {};
   const parts = [];
-  parts.push(`<p class="pc-name">${esc(areaName(geoid))}</p>`);
+  parts.push(`<p class="pc-name" id="pc-name" tabindex="-1">${esc(areaName(geoid))}</p>`);
   const outside = !scopedGeoids().includes(geoid);
   if (outside) {
     // Inspecting a place is not the same as putting it in the view: it is not

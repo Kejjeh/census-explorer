@@ -81,6 +81,22 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
   border-radius: var(--radius); font-weight: 600; text-decoration: none;
 }
 .skip-link:focus { top: var(--s3); }
+/* Skip links inside the page: out of sight until focused, then shown in place
+ * as an ordinary link, so a keyboard user sees where the next stop is. */
+.skip-inline {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.skip-inline:focus {
+  position: static; width: auto; height: auto; overflow: visible; clip: auto; clip-path: none;
+  display: inline-block; margin: var(--s2) 0; padding: var(--s2) var(--s3);
+  background: var(--surface); color: var(--accent-2); font-weight: 600;
+  border: 1px solid var(--accent); border-radius: var(--radius);
+  outline: 2px solid var(--focus); outline-offset: 2px; white-space: normal;
+}
+.result-actions { display: flex; gap: var(--s2); flex-wrap: wrap; border-radius: var(--radius); }
+.result-actions:focus { outline: 2px solid var(--focus); outline-offset: 3px; }
+#table-title:focus { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .muted { color: var(--muted); }
 .tiny { font-size: 12px; }
@@ -323,14 +339,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 .scope-bar { padding: var(--s2) var(--s3); background: var(--surface);
   border: 1px solid var(--line-2); border-left: 4px solid var(--accent); border-radius: var(--radius); }
 .scope-bar strong { color: var(--ink); font-size: 13.5px; }
-.scope-bar:focus { outline: 2px solid var(--focus); outline-offset: 2px; }
+.scope-bar:focus, .pc-name:focus { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .table-pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3);
   padding: var(--s2) 0; font-size: 12.5px; }
 .table-pager:empty { display: none; }
 .pager-status { margin: 0; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .pager-buttons { display: flex; flex-wrap: wrap; gap: var(--s1); }
-.pager-size select { font: inherit; padding: 2px var(--s1); }
+.pager-size select { font: inherit; padding: 2px var(--s1); min-height: 28px; }
 #table-body tr:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
 
 .pc-outside, .slot-outside { color: var(--warn); font-size: 12px; margin: var(--s1) 0; }
@@ -342,6 +358,11 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 .interval-chart .ic-axis { stroke: var(--line-2); }
 .interval-chart .ic-tick { font-size: 10px; fill: var(--muted); font-variant-numeric: tabular-nums; }
 .interval-chart .ic-axis-label { font-size: 10.5px; fill: var(--ink-2); }
+.interval-chart .ic-label, .interval-chart .ic-missing {
+  /* A halo in the background colour, so the zero line and grid lines do not
+   * run through the place names. */
+  paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round;
+}
 .interval-chart .ic-label { font-size: 11.5px; fill: var(--ink); }
 .interval-chart .ic-interval, .interval-chart .ic-cap { stroke: var(--ink-2); stroke-width: 2; }
 .interval-chart .ic-point { fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; }
@@ -530,7 +551,7 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
 .diff-note { color: var(--muted); display: block; margin-top: 2px; }
 
 .codes-panel { margin-top: var(--s5); font-size: 12.5px; }
-.codes-panel summary { cursor: pointer; color: var(--accent-2); font-weight: 550; }
+.codes-panel summary { cursor: pointer; color: var(--accent-2); font-weight: 550; padding: 4px 0; min-height: 24px; }
 .codes-panel dl { margin: var(--s3) 0 0; }
 .codes-panel dt { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: var(--s2); }
 .codes-panel dd { margin: 2px 0 0; overflow-wrap: anywhere; }
@@ -619,9 +640,12 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
   .release-chip { order: 2; width: 100%; }
   .topbar-actions { order: 3; width: 100%; margin-left: 0; }
   .topbar-actions .btn { flex: 1; }
+  .topbar-actions .result-actions { flex: 3 1 auto; }
   .place-find { flex: 1 1 100%; min-width: 0; }
   .save-panel { right: var(--s2); left: var(--s2); width: auto; top: 120px; }
-  .table-scroll { max-height: 320px; }
+  /* Stacked, the table scrolls with the page. A box a few rows tall inside
+   * a scrolling page hid most of each page of rows at 390 px. */
+  .table-scroll { max-height: none; }
   #measure-title { font-size: 18px; }
   .pc-value { font-size: 26px; }
 }

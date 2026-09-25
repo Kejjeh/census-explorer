@@ -392,10 +392,15 @@ function intervalChartSvg(model, opts) {
   parts.push(`<title id="${id}-t">${svgEscape(o.title || 'Comparison')}</title>`);
   parts.push(`<desc id="${id}-d">${svgEscape([o.desc || '', ...words, ...model.notes]
     .filter(Boolean).join(' '))}</desc>`);
-  // Grid and the zero line, which is always inside the axis.
+  // Grid and the zero line, which is always inside the axis. They are drawn
+  // in each row's plotting band only, below its label, so no line runs
+  // through a place name (a halo alone left the line visible between letters).
   model.ticks.forEach((t) => {
-    parts.push(`<line class="ic-grid${t === 0 ? ' ic-zero' : ''}" x1="${x(t).toFixed(1)}" ` +
-      `x2="${x(t).toFixed(1)}" y1="${top}" y2="${axisY}"/>`);
+    model.rows.forEach((_, i) => {
+      const y0 = top + i * rowH;
+      parts.push(`<line class="ic-grid${t === 0 ? ' ic-zero' : ''}" x1="${x(t).toFixed(1)}" ` +
+        `x2="${x(t).toFixed(1)}" y1="${y0 + 22}" y2="${i === model.rows.length - 1 ? axisY : y0 + rowH}"/>`);
+    });
     parts.push(`<text class="ic-tick" x="${x(t).toFixed(1)}" y="${axisY + 14}" ` +
       `text-anchor="middle">${svgEscape(fmtV(t))}</text>`);
   });
