@@ -641,7 +641,12 @@ def _build_into(out_dir: Path, repo_root: Path, release_id: str | None,
     manifest = {
         "site": SITE_MARKER,
         "generated_at": provenance.utc_now(),
+        # The census data's build revision (also in status.json, and so part
+        # of the snapshot), and separately the revision of the code that
+        # wrote this site. They differ whenever an unchanged data release is
+        # published with newer page code.
         "code_revision": dataset.get("code_revision"),
+        "site_code_revision": provenance.code_revision(repo_root),
         "data_mode": data_mode,
         "base_path": base_path,
         "release": release,

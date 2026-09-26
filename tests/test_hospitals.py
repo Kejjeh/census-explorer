@@ -702,7 +702,11 @@ class ServiceAndStaticSite(unittest.TestCase):
     def test_published_provenance_names_retrieval_rules_and_mode(self):
         pub = json.loads((self.withh / "data/hospitals/registry.json").read_text())
         self.assertEqual(len(pub["sites"]), len(self.reg["sites"]))
-        man = json.loads((self.withh / "data/manifest.json").read_text())["hospitals"]
+        full = json.loads((self.withh / "data/manifest.json").read_text())
+        # The page code's own revision is recorded apart from the census data's.
+        self.assertIn("site_code_revision", full)
+        self.assertEqual(self.cfg_plain["snapshot"], self.cfg_with["snapshot"])
+        man = full["hospitals"]
         self.assertEqual(man["retrieval_manifest_id"], self.reg["retrieval_manifest_id"])
         self.assertEqual(man["sites"], 6)
         self.assertEqual((man["data_mode"], man["rules_sha256"], man["rules_version"]),
