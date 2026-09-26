@@ -30,13 +30,22 @@ const GROUP_LABEL = {
 };
 
 const LOCATION_SHORT = {
-  valid: 'Mapped',
-  missing: 'No location: none published',
-  incomplete: 'No location: incomplete coordinates',
-  unparseable: 'No location: coordinates not numbers',
-  zero: 'No location: placeholder 0, 0',
-  outside_new_york: 'No location: outside New York',
+  missing: 'Not mapped: no location published',
+  incomplete: 'Not mapped: incomplete coordinates',
+  unparseable: 'Not mapped: coordinates not numbers',
+  zero: 'Not mapped: placeholder 0, 0',
+  outside_new_york: 'Not mapped: coordinates outside New York',
 };
+
+/** A short, controlled label for the directory's Location column. */
+function mapLabel(s) {
+  if (s.map_status === 'mapped') return 'Mapped';
+  if (s.map_status === 'not_mapped_county_conflict') {
+    return `Not mapped: published point is in ${s.location_in_county_name || 'another'} County, not the listed ${s.county_name}`;
+  }
+  if (s.map_status === 'not_mapped_county_unverified') return 'Not mapped: point not placed in one county';
+  return LOCATION_SHORT[s.location_status] || 'Not mapped: no location';
+}
 
 const MAIN_SITE_TEXT = {
   is_main_site: 'HFIS lists no other main site for this hospital.',
@@ -114,18 +123,36 @@ function facets(sites) {
 }
 
 /**
- * What the map can show of a filtered list: located sites whose listed
- * county is in the mapped area. `scopeCounties` null means the whole state.
+ * What the map can show of a filtered list.
+ *
+ * Contract: filters use the county HFIS lists. A site is drawn only if its
+ * registry map_status is "mapped" (its published point, NYSDOH's geocode of
+ * the mailing address, lies in that listed county) and that county is in the
+ * mapped area. A site whose point lies in another county is counted as a
+ * conflict and listed, never drawn under the county it is filtered by.
+ * `scopeCounties` null means the whole state.
  */
 function mapPlan(filtered, scopeCounties) {
   const inScope = scopeCounties ? new Set(scopeCounties) : null;
-  const plan = { drawn: [], unlocated: 0, outside: 0 };
+  const plan = { drawn: [], unlocated: 0, conflict: 0, outside: 0 };
   filtered.forEach((s) => {
-    if (s.location_status !== 'valid') plan.unlocated += 1;
+    if (s.map_status === 'not_mapped_no_location') plan.unlocated += 1;
+    else if (s.map_status !== 'mapped') plan.conflict += 1;
     else if (inScope && !inScope.has(s.county_fips)) plan.outside += 1;
     else plan.drawn.push(s);
   });
   return plan;
+}
+
+/** The plan in words; the directory summary and the map note both use it. */
+function planSentence(plan) {
+  const n = (x) => x.toLocaleString('en-US');
+  return [
+    `${n(plan.drawn.length)} are drawn on the map`,
+    plan.outside ? `${n(plan.outside)} lie in counties outside the mapped area` : '',
+    plan.conflict ? `${n(plan.conflict)} are not drawn because the published point lies outside the listed county` : '',
+    plan.unlocated ? `${n(plan.unlocated)} have no published location` : '',
+  ].filter(Boolean).join('; ') + '. Points are NYSDOH geocodes of each site\'s mailing address, as published.';
 }
 
 const SITE_CSV_COLUMNS = [
@@ -133,7 +160,8 @@ const SITE_CSV_COLUMNS = [
   'main_site_status', 'address1', 'address2', 'city', 'zip', 'hfis_county_code',
   'hfis_county_name', 'county_fips', 'county_crosswalk', 'ownership', 'ownership_types',
   'operators', 'latitude', 'longitude', 'location_status', 'location_reason',
-  'location_county_check', 'certified_bed_records_json', 'certification_rows',
+  'location_county_check', 'point_county_fips', 'point_county_name', 'map_status', 'map_reason',
+  'certified_bed_records_json', 'certification_rows',
   'cms_ccn_candidates', 'open_date_as_published', 'hfis_rows_updated',
   'data_mode', 'retrieval_manifest_id', 'rules_version', 'rules_sha256',
 ];
@@ -144,7 +172,7 @@ const SITE_CSV_COLUMNS = [
  * modes are refused rather than shown.
  */
 function checkPair(registry, cert) {
-  if (!registry || registry.schema_version !== 1) throw new Error('The hospital registry has an unsupported schema.');
+  if (!registry || registry.schema_version !== 2) throw new Error('The hospital registry has an unsupported schema.');
   if (!['live', 'fixture'].includes(registry.data_mode)) {
     throw new Error(`The hospital registry has an unknown data mode (${registry.data_mode}); it is not shown.`);
   }
@@ -181,6 +209,7 @@ function sitesCsv(list, registry) {
       (s.ownership_types || []).join('; '),
       (s.operators || []).map((o) => o.name).join('; '),
       s.lat, s.lon, s.location_status, s.location_reason, s.location_county_check,
+      s.location_in_county_fips, s.location_in_county_name, s.map_status, s.map_reason,
       // Every bed record whole, as JSON: category, count or why there is none,
       // sub type, raw and parsed date, date note. Never a total.
       JSON.stringify(s.certified_beds || []),
@@ -315,11 +344,9 @@ function createHospitalLayer() {
     renderSummary();
     const warn = modeWarning(hs.reg);
     $h('hosp-map-note').textContent = (warn ? `${warn} ` : '') +
-      `${plan.drawn.length.toLocaleString('en-US')} hospital sites drawn in this map area. ` +
+      `Of ${hs.filtered.length.toLocaleString('en-US')} filtered hospital sites, ${planSentence(plan)} ` +
       'Circles are hospitals; squares are hospital extension sites (clinics, school-based ' +
-      'and mobile sites, off-campus emergency departments). ' +
-      (plan.outside ? `${plan.outside.toLocaleString('en-US')} filtered sites lie outside the mapped area. ` : '') +
-      (plan.unlocated ? `${plan.unlocated.toLocaleString('en-US')} have no published location and are listed below only.` : '');
+      'and mobile sites, off-campus emergency departments). Sites not drawn are listed below with the reason.';
   }
 
   function zoom(k) {
@@ -438,10 +465,8 @@ function createHospitalLayer() {
     const list = hs.filtered;
     const plan = mapPlan(list, scopeCounties());
     box.textContent =
-      `${list.length.toLocaleString('en-US')} of ${hs.reg.sites.length.toLocaleString('en-US')} sites match. ` +
-      `${plan.drawn.length.toLocaleString('en-US')} are on the map` +
-      (plan.outside ? `, ${plan.outside.toLocaleString('en-US')} lie outside the mapped area` : '') +
-      (plan.unlocated ? `, ${plan.unlocated.toLocaleString('en-US')} have no published location` : '') + '.';
+      `${list.length.toLocaleString('en-US')} of ${hs.reg.sites.length.toLocaleString('en-US')} sites match ` +
+      `(county = the county HFIS lists). ${planSentence(plan)}`;
   }
 
   function renderRows() {
@@ -455,7 +480,7 @@ function createHospitalLayer() {
           <span class="muted tiny">HFIS ${hEsc(s.fac_id)} · ${hEsc(s.city)}</span></th>
         <td data-label="Type">${hEsc(s.type)}${s.type !== GROUP_LABEL[s.type_group] ? `<br><span class="muted tiny">${hEsc(GROUP_LABEL[s.type_group])}</span>` : ''}</td>
         <td data-label="County">${hEsc(s.county_name)}</td>
-        <td data-label="Location">${hEsc(LOCATION_SHORT[s.location_status] || s.location_status)}</td>
+        <td data-label="Location"${s.map_status === 'mapped' ? '' : ' class="hosp-unmapped"'}>${hEsc(mapLabel(s))}</td>
         <td data-label="CMS entity candidate">${(s.cms_candidates || []).map((c) => `${hEsc(c.ccn)} <span class="muted tiny">${hEsc(MATCH_TEXT[c.state])}</span>`).join('<br>') || '<span class="muted">none</span>'}</td>
       </tr>`).join('') || '<tr><td colspan="5">No site matches these filters.</td></tr>';
     $h('hosp-rows').querySelectorAll('button[data-fac]').forEach((b) => {
@@ -572,11 +597,6 @@ function createHospitalLayer() {
       ? ` HFIS spells it “${hEsc(s.county_name_hfis)}”; matched to the Census name by a reviewed spelling alias.` : '';
     const localityNote = s.locality_check !== 'agrees'
       ? ` The NYS Locality Hierarchy gives ${hEsc(s.locality_fips || 'no code')} here (${hEsc(s.locality_check.replace(/_/g, ' '))}); the Census code is used.` : '';
-    const shapeNote = {
-      in_other_county: ` The published point falls inside ${hEsc(s.location_in_county_fips)}, not the listed county. Shown as published.`,
-      outside_county_shapes: ' The published point falls outside every county shape (shapes are generalized). Shown as published.',
-      several_counties: ' The published point falls on more than one county shape.',
-    }[s.location_county_check] || '';
     const cands = (s.cms_candidates || []).map((c) => (
       `<li><button type="button" class="linkish" data-open-ccn="${hEsc(c.ccn)}">CCN ${hEsc(c.ccn)}</button>: ` +
       `${hEsc(MATCH_TEXT[c.state])}</li>`)).join('');
@@ -588,8 +608,7 @@ function createHospitalLayer() {
         <dt>Address</dt><dd>${hEsc(s.address1)}${s.address2 ? `, ${hEsc(s.address2)}` : ''}, ${hEsc(s.city)}, NY ${hEsc(s.zip)}</dd>
         <dt>County</dt><dd>${hEsc(s.county_name)} (FIPS ${hEsc(s.county_fips || 'not matched')}; HFIS county code ${hEsc(s.hfis_county_code)}, which is not a FIPS code).${countyNote}${localityNote}</dd>
         <dt>Location</dt><dd>${s.location_status === 'valid'
-          ? `${hEsc(s.lat)}, ${hEsc(s.lon)}. ${hEsc(s.location_reason)}${shapeNote}`
-          : `Not mapped. ${hEsc(s.location_reason)} The site stays in the directory and the CSV.`}</dd>
+          ? `Published point ${hEsc(s.lat)}, ${hEsc(s.lon)} (NYSDOH geocode of the mailing address). ` : ''}${hEsc(s.map_reason)}${s.map_status === 'mapped' ? '' : ' The site stays in the directory and the CSV.'}</dd>
         <dt>Main site</dt><dd>${main}</dd>
         <dt>Ownership</dt><dd>${hEsc(s.ownership)}${(s.ownership_types || []).length > 1 ? ` (${hEsc(s.ownership_types.join('; '))})` : ''}</dd>
         <dt>Operator</dt><dd>${hEsc((s.operators || []).map((o) => o.name).join('; '))}</dd>
@@ -683,7 +702,13 @@ function createHospitalLayer() {
         ${r.duplicates.fac_ids_with_repeated_rows} sites appear on several rows, once per operator or cooperator).
         HFIS Certification: ${c.certification_rows.toLocaleString('en-US')} rows, ${c.certification_rows_for_sites.toLocaleString('en-US')} for these sites.</p>
       <p>Other HFIS facility types, not shown:</p><ul>${li(c.excluded_rows_by_type)}</ul>
-      <p>Locations: ${hEsc(JSON.stringify(r.locations.by_status))}. Point-in-county check against Census shapes: ${hEsc(JSON.stringify(r.locations.county_shape_check))}.</p>
+      <p>Locations: ${hEsc(JSON.stringify(r.locations.by_status))}. Point-in-county check against Census shapes: ${hEsc(JSON.stringify(r.locations.county_shape_check))}. Map: ${hEsc(JSON.stringify(r.locations.by_map_status))}.</p>
+      <p>${hEsc(r.locations.map_contract)}</p>
+      <details><summary>${r.locations.in_other_county.length} sites whose published point lies outside their listed county</summary>
+        <div class="table-scroll"><table class="hosp-mini"><caption class="visually-hidden">Sites whose published point lies outside the listed county</caption>
+        <thead><tr><th scope="col">HFIS site</th><th scope="col">Listed county</th><th scope="col">County of published point</th></tr></thead>
+        <tbody>${r.locations.in_other_county.map((x) => `<tr><td>${hEsc(x.name)} <span class="muted tiny">HFIS ${hEsc(x.fac_id)}</span></td><td>${hEsc(x.listed_county)} (${hEsc(x.listed_fips)})</td><td>${hEsc(x.point_county || 'none')} (${hEsc(x.point_fips || '—')})</td></tr>`).join('')}</tbody></table></div>
+      </details>
       <p>Counties: FIPS from ${hEsc(r.counties.fips_source)}. Locality Hierarchy cross-check disagreements: ${hEsc(JSON.stringify(r.counties.locality_disagreements))}.</p>
       <p>CMS entity to HFIS site candidates, by state: ${hEsc(JSON.stringify(r.cms_match.by_state))}. Sites named for several CCNs: ${hEsc(JSON.stringify(r.cms_match.sites_shared_by_ccns))}.</p>
       <p>Reconciliation checks:</p><ul>${r.checks.map((k) => `<li>${k.passed ? 'Passed' : 'FAILED'}: ${hEsc(k.detail)}</li>`).join('')}</ul>
@@ -710,6 +735,7 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {
     filterSites, facets, mapPlan, sitesCsv, hospCsvField, ratingSummary,
     safeOfficialUrl, careCompareUrl, hEsc, SITE_CSV_COLUMNS, checkPair, modeWarning,
+    mapLabel, planSentence,
   };
 } else if (typeof window !== 'undefined') {
   window.HospitalLayer = createHospitalLayer();

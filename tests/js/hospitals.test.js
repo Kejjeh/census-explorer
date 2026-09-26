@@ -9,13 +9,13 @@ const site = (id, extra = {}) => ({
   fac_id: id, name: `Synthetic ${id}`, type: 'Hospital', type_group: 'hospital',
   county_fips: '36001', county_name: 'Albany', county_name_hfis: 'Albany',
   ownership: 'County', city: 'Testville', address1: '1 Test St',
-  location_status: 'valid', lat: 42.6, lon: -73.7, ...extra,
+  location_status: 'valid', lat: 42.6, lon: -73.7, map_status: 'mapped', ...extra,
 });
 
 const SITES = [
   site('0101'),
   site('202', { type: 'Hospital Extension Clinic', type_group: 'extension',
-    location_status: 'missing', lat: null, lon: null }),
+    location_status: 'missing', lat: null, lon: null, map_status: 'not_mapped_no_location' }),
   site('303', { county_fips: '36089', county_name: 'St. Lawrence', ownership: 'State' }),
   site('404', { county_fips: '36089', county_name: 'St. Lawrence', name: '=HYPERLINK("x")' }),
 ];
@@ -115,7 +115,7 @@ test('the CSV keeps every bed record whole, one row per site, never a total', ()
 });
 
 test('registry and certification must come from the same build', () => {
-  const reg = { schema_version: 1, data_mode: 'live', retrieval_manifest_id: 'a', rules_sha256: 'r' };
+  const reg = { schema_version: 2, data_mode: 'live', retrieval_manifest_id: 'a', rules_sha256: 'r' };
   assert.doesNotThrow(() => H.checkPair(reg, { ...reg }));
   assert.throws(() => H.checkPair(reg, { ...reg, retrieval_manifest_id: 'b' }), /does not belong/);
   assert.throws(() => H.checkPair(reg, { ...reg, rules_sha256: 'x' }), /does not belong/);
@@ -126,4 +126,38 @@ test('registry and certification must come from the same build', () => {
 test('non-live hospital data always carries its own warning', () => {
   assert.strictEqual(H.modeWarning({ data_mode: 'live' }), '');
   assert.match(H.modeWarning({ data_mode: 'fixture' }), /SYNTHETIC HOSPITAL DATA/);
+});
+
+test('a point outside its listed county is listed, exported and counted, never drawn', () => {
+  // The reviewed real pattern (HFIS 15716): listed Albany, point in Queens.
+  const van = site('15716', {
+    name: 'Synthetic mobile van', type: 'Mobile Hospital Extension Clinic', type_group: 'extension',
+    address1: '327 Beach 19th Street', city: 'Far Rockaway', zip: '11691',
+    lat: 40.59866, lon: -73.753, location_county_check: 'in_other_county',
+    location_in_county_fips: '36081', location_in_county_name: 'Queens',
+    map_status: 'not_mapped_county_conflict',
+    map_reason: 'Not drawn. HFIS lists this site in Albany County, but its published point lies in Queens County.',
+  });
+  const sites = [...SITES, van];
+  const albany = H.filterSites(sites, { county: '36001' });
+  assert.ok(albany.some((s) => s.fac_id === '15716'), 'the county filter keeps the listed county');
+  for (const scope of [['36001'], ['36081'], null]) {
+    const plan = H.mapPlan(albany, scope);
+    assert.ok(!plan.drawn.some((s) => s.fac_id === '15716'), `never drawn (scope ${scope})`);
+    assert.strictEqual(plan.conflict, 1);
+    assert.strictEqual(plan.drawn.length + plan.unlocated + plan.conflict + plan.outside, albany.length);
+  }
+  // Nor under the county its point lies in: the filter there does not include it.
+  assert.ok(!H.filterSites(sites, { county: '36081' }).some((s) => s.fac_id === '15716'));
+  assert.strictEqual(H.mapLabel(van), 'Not mapped: published point is in Queens County, not the listed Albany');
+  assert.strictEqual(H.mapLabel(sites[0]), 'Mapped');
+  assert.match(H.planSentence(H.mapPlan(albany, ['36001'])),
+    /1 are not drawn because the published point lies outside the listed county.*NYSDOH geocodes of each site's mailing address/);
+  const lines = H.sitesCsv(albany, { retrieval_manifest_id: 'm', data_mode: 'live', dates: { nys: 'd' } }).trim().split('\r\n');
+  assert.strictEqual(lines.length, 1 + albany.length);
+  const header = lines[0].split(',');
+  const row = lines.find((l) => l.startsWith('15716,'));
+  assert.ok(row.includes(',40.59866,-73.753,valid,'), 'published coordinates exported as published');
+  assert.ok(row.includes(',36081,Queens,not_mapped_county_conflict,'), 'point county and map status exported');
+  assert.ok(header.includes('map_status') && header.includes('map_reason') && header.includes('hfis_county_name'));
 });

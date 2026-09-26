@@ -47,7 +47,9 @@ from .redact import RedactedError
 from .retrieve import hospitals as retrieve
 
 REGISTRY_DIR = Path("data/processed/hospitals")
-REGISTRY_SCHEMA = 1
+#: 2: every site carries map_status / map_reason (a published point outside its
+#: listed county is not drawn). Consumers refuse other versions.
+REGISTRY_SCHEMA = 2
 CCN_RE = re.compile(r"^[0-9A-Z]{6}$")
 FAC_ID_RE = re.compile(r"^[0-9]+$")
 
@@ -134,6 +136,40 @@ LOCATION_REASONS = {
     "zero": "The published coordinates are 0, 0, a placeholder.",
     "outside_new_york": "The published coordinates fall outside New York State.",
 }
+
+
+MAP_STATUSES = ("mapped", "not_mapped_no_location", "not_mapped_county_conflict",
+                "not_mapped_county_unverified")
+
+
+def map_status(site: dict) -> tuple[str, str]:
+    """Whether a site is drawn, and why, as a controlled status and a sentence.
+
+    The contract: a site is drawn only where its published point (NYSDOH's
+    geocode of the mailing address) lies inside the county HFIS lists for it.
+    The listed county is what county filters use; the point is what the map
+    uses; where they disagree, drawing the point under that county would put
+    a mark somewhere the filter says it is not. Such sites stay in the
+    directory and the CSV with both values, as published. Nothing is
+    relabelled or geocoded.
+    """
+    listed = site.get("county_name") or site.get("county_name_hfis") or "the listed county"
+    if site["location_status"] != "valid":
+        return "not_mapped_no_location", site["location_reason"]
+    check = site["location_county_check"]
+    if check == "in_listed_county":
+        return "mapped", ("Drawn at the published point, which NYSDOH geocoded from the "
+                          f"mailing address and which lies in the listed county ({listed}).")
+    if check == "in_other_county":
+        point = site.get("location_in_county_name") or "another county"
+        return "not_mapped_county_conflict", (
+            f"Not drawn. HFIS lists this site in {listed} County, but its published point, "
+            f"which NYSDOH geocoded from the mailing address, lies in {point} County "
+            f"(FIPS {site.get('location_in_county_fips')}). Both are kept as published; "
+            "neither is corrected.")
+    return "not_mapped_county_unverified", (
+        "Not drawn. The published point could not be placed in exactly one county "
+        "shape, so it cannot be checked against the listed county.")
 
 
 def _point_in_ring(x: float, y: float, ring: list) -> bool:
@@ -298,11 +334,13 @@ def build_registry(inputs: dict, cfg: dict, *, rules: dict | None = None,
             "the Census county list is required for county FIPS codes; build the "
             "ACS release first or pass --shapes")
     census_fips: dict[str, str] = {}
+    census_name_by_fips: dict[str, str] = {}
     for f in county_shapes:
         name = f["properties"]["NAME"]
         if name in census_fips:
             raise RegistryError(f"the Census county list names {name!r} twice")
         census_fips[name] = f["properties"]["GEOID"]
+        census_name_by_fips[f["properties"]["GEOID"]] = name
     check("census_counties_unique", len(set(census_fips.values())) == len(census_fips),
           f"{len(census_fips)} Census counties, each with its own FIPS code")
     locality = [r for r in inputs["locality"] if r["Type Code"] == "1"]
@@ -372,6 +410,8 @@ def build_registry(inputs: dict, cfg: dict, *, rules: dict | None = None,
                 "several_counties" if len(found) > 1 else
                 "in_listed_county" if found[0] == fips else
                 "in_other_county")
+        site["location_in_county_name"] = census_name_by_fips.get(site["location_in_county_fips"])
+        site["map_status"], site["map_reason"] = map_status(site)
         sites.append(site)
 
     # Fail closed: a site whose repeated rows disagree on any site-level field
@@ -687,9 +727,17 @@ def build_registry(inputs: dict, cfg: dict, *, rules: dict | None = None,
                 "unlocated": [{"fac_id": s["fac_id"], "name": s["name"],
                                "status": s["location_status"]}
                               for s in sites if s["location_status"] != "valid"],
+                "by_map_status": dict(Counter(s["map_status"] for s in sites)),
+                "map_contract": (
+                    "County filters use the county HFIS lists. The map draws a site only "
+                    "where its published point (NYSDOH's geocode of the mailing address) "
+                    "lies in that county; other sites stay listed with their reason."),
                 "in_other_county": [{"fac_id": s["fac_id"], "name": s["name"],
+                                     "listed_county": s["county_name"],
                                      "listed_fips": s["county_fips"],
-                                     "point_fips": s["location_in_county_fips"]}
+                                     "point_county": s["location_in_county_name"],
+                                     "point_fips": s["location_in_county_fips"],
+                                     "map_status": s["map_status"]}
                                     for s in sites
                                     if s["location_county_check"] in ("in_other_county", "outside_county_shapes", "several_counties")],
             },
@@ -885,7 +933,7 @@ def summary_lines(registry: dict) -> list[str]:
         f"field conflicts: {len(r['duplicates']['field_conflicts'])}",
         f"counties: aliases {r['counties']['aliases_used']}, unmatched {r['counties']['unmatched_names']}",
         f"locations: {r['locations']['by_status']}; county shape check "
-        f"{r['locations']['county_shape_check']}",
+        f"{r['locations']['county_shape_check']}; map {r['locations']['by_map_status']}",
         f"CMS -> HFIS candidates: {r['cms_match']['by_state']}",
     ]
     for chk in r["checks"]:

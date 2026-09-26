@@ -677,6 +677,7 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
 .hosp-table thead th { font-size: 12px; color: var(--muted); }
 .hosp-table tbody th { font-weight: 400; }
 .hosp-table tr.picked { background: var(--accent-soft); }
+.hosp-table td.hosp-unmapped { color: var(--warn); font-weight: 600; }
 .hosp-table .tiny, .hosp-detail .tiny { display: inline-block; }
 .linkish { font: inherit; background: none; border: 0; padding: 2px 0; min-height: 24px;
   color: var(--accent); text-decoration: underline; cursor: pointer; text-align: left; }

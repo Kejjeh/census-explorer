@@ -544,24 +544,32 @@ async function hospitalLayer(mode, url) {
     'the registry is live data and carries no synthetic-data banner',
     `data mode ${reg.data_mode}; rules v${reg.rules_version} ${String(reg.rules_sha256).slice(0, 12)}`);
 
-  // A county with at least one unlocated site, so "missing location" is exercised.
+  // A county with an unlocated site and, where one exists, a site whose
+  // published point lies outside the listed county, so both are exercised.
   const byCounty = {};
   sites.forEach((s) => { (byCounty[s.county_fips] ||= []).push(s); });
-  const county = Object.keys(byCounty).filter((c) => byCounty[c].some((s) => s.location_status !== 'valid'))
-    .sort((a, b) => byCounty[a].length - byCounty[b].length)[0];
+  const has = (c, st) => byCounty[c].some((s) => s.map_status === st);
+  const candidates = Object.keys(byCounty).filter((c) => has(c, 'not_mapped_no_location'));
+  const both = candidates.filter((c) => has(c, 'not_mapped_county_conflict'));
+  const county = (both.length ? both : candidates).sort((a, b) => byCounty[a].length - byCounty[b].length)[0];
   const expected = byCounty[county];
-  const expectedLocated = expected.filter((s) => s.location_status === 'valid').map((s) => s.fac_id).sort();
+  const expectedMapped = expected.filter((s) => s.map_status === 'mapped').map((s) => s.fac_id).sort();
+  const nUnlocated = expected.filter((s) => s.map_status === 'not_mapped_no_location').length;
+  const nConflict = expected.length - expectedMapped.length - nUnlocated;
   await page.selectOption('#hosp-county', county);
   await page.waitForTimeout(150);
   const marks = (await hospMarks(page)).sort();
   const summary = await text(page, '#hosp-summary');
-  report.check(JSON.stringify(marks) === JSON.stringify(expectedLocated),
-    `county filter (${expected[0].county_name}, ${county}): the map draws exactly its located sites`,
-    `${marks.length} markers; ${expected.length} sites, ${expected.length - expectedLocated.length} unlocated`);
-  report.check(summary.startsWith(`${expected.length.toLocaleString('en-US')} of ${sites.length.toLocaleString('en-US')} sites match.`)
-    && summary.includes(`${expectedLocated.length.toLocaleString('en-US')} are on the map`)
-    && summary.includes(`${(expected.length - expectedLocated.length).toLocaleString('en-US')} have no published location`),
-  'the directory summary states the same counts', summary);
+  report.check(JSON.stringify(marks) === JSON.stringify(expectedMapped),
+    `county filter (${expected[0].county_name}, ${county}): the map draws exactly its sites whose point lies in that county`,
+    `${marks.length} markers; ${expected.length} sites, ${nUnlocated} unlocated, ${nConflict} with a point in another county`);
+  const n = (x) => x.toLocaleString('en-US');
+  report.check(summary.startsWith(`${n(expected.length)} of ${n(sites.length)} sites match (county = the county HFIS lists).`)
+    && summary.includes(`${n(expectedMapped.length)} are drawn on the map`)
+    && summary.includes(`${n(nUnlocated)} have no published location`)
+    && (!nConflict || summary.includes(`${n(nConflict)} are not drawn because the published point lies outside the listed county`))
+    && summary.includes('NYSDOH geocodes of each site\'s mailing address'),
+  'the directory summary states the same counts, and what the points are', summary);
   const rows = await page.$$eval('#hosp-rows button[data-fac]', (b) => b.map((x) => x.dataset.fac));
   report.check(rows.length === Math.min(25, expected.length) && rows.every((f) => expected.some((s) => s.fac_id === f)),
     'the table lists only that county\'s sites', `${rows.length} rows on page 1`);
@@ -595,17 +603,57 @@ async function hospitalLayer(mode, url) {
     `${expected.reduce((n, s) => n + s.certified_beds.length, 0)} bed records; ${csvIds.length} rows`);
 
   // An unlocated site: listed, reason shown, not drawn.
-  const unlocated = expected.find((s) => s.location_status !== 'valid');
+  const unlocated = expected.find((s) => s.map_status === 'not_mapped_no_location');
   await page.fill('#hosp-q', unlocated.fac_id); await page.waitForTimeout(150);
+  const unlocatedRow = await text(page, `#hosp-rows tr:has(button[data-fac="${unlocated.fac_id}"]) td[data-label="Location"]`);
   await page.click(`#hosp-rows button[data-fac="${unlocated.fac_id}"]`); await page.waitForTimeout(150);
   const det = await text(page, '#hosp-detail');
-  report.check(det.includes('Not mapped.') && det.includes(unlocated.location_reason)
+  report.check(/^Not mapped: /.test(unlocatedRow) && det.includes(unlocated.location_reason)
     && det.includes('stays in the directory and the CSV') && !(await hospMarks(page)).includes(unlocated.fac_id),
-  'an unlocated site shows its reason and is not drawn', `${unlocated.fac_id}: ${unlocated.location_reason}`);
+  'an unlocated site shows its reason in the table and details and is not drawn', `${unlocated.fac_id}: ${unlocatedRow}`);
   await page.fill('#hosp-q', ''); await page.selectOption('#hosp-county', '');
 
+  // A site whose published point lies outside its listed county (the reviewed
+  // case is HFIS 15716: listed Albany, point in Queens). It stays under its
+  // listed county, says so in the table, details and CSV, and is never drawn.
+  const conflict = sites.find((s) => s.fac_id === '15716' && s.map_status === 'not_mapped_county_conflict')
+    || sites.find((s) => s.map_status === 'not_mapped_county_conflict');
+  if (conflict) {
+    await page.selectOption('#hosp-county', conflict.county_fips);
+    await page.fill('#hosp-q', conflict.fac_id); await page.waitForTimeout(150);
+    const cell = await text(page, `#hosp-rows tr:has(button[data-fac="${conflict.fac_id}"]) td[data-label="Location"]`);
+    const label = `Not mapped: published point is in ${conflict.location_in_county_name} County, not the listed ${conflict.county_name}`;
+    await page.click(`#hosp-rows button[data-fac="${conflict.fac_id}"]`); await page.waitForTimeout(150);
+    const cdet = await text(page, '#hosp-detail');
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#hosp-csv')]);
+    const cl = fs.readFileSync(await dl.path(), 'utf8').trim().split('\r\n');
+    const ch = cl[0].split(',');
+    const crow = cl.slice(1).map(parseLine).find((c) => c[0] === conflict.fac_id) || [];
+    const col = (k) => crow[ch.indexOf(k)];
+    // Every marker statewide, with all filters cleared (the map is New York State).
+    await page.fill('#hosp-q', ''); await page.selectOption('#hosp-county', ''); await page.waitForTimeout(150);
+    const allMarks = await hospMarks(page);
+    const mappedIds = sites.filter((s) => s.map_status === 'mapped').map((s) => s.fac_id).sort();
+    report.check(JSON.stringify([...allMarks].sort()) === JSON.stringify(mappedIds),
+      'statewide, every drawn marker is a site whose point lies in its listed county, and every such site is drawn',
+      `${allMarks.length} markers; ${JSON.stringify(reg.reports.locations.by_map_status)}`);
+    report.check(cell === label && cdet.includes(conflict.map_reason)
+      && cdet.includes(`Published point ${conflict.lat}, ${conflict.lon} (NYSDOH geocode of the mailing address)`)
+      && col('map_status') === 'not_mapped_county_conflict' && col('hfis_county_name') === conflict.county_name_hfis
+      && col('county_fips') === conflict.county_fips && col('point_county_fips') === conflict.location_in_county_fips
+      && col('latitude') === String(conflict.lat) && col('longitude') === String(conflict.lon)
+      && !allMarks.includes(conflict.fac_id),
+    'a site whose published point lies outside its listed county is labelled in the table, explained in the details, exported with both counties and its coordinates, and never drawn',
+    `${conflict.fac_id} ${conflict.name}: "${cell}"`);
+    const cov = await page.$eval('.hosp-coverage', (el) => el.textContent.replace(/\s+/g, ' '));
+    report.check(cov.includes(`${reg.reports.locations.in_other_county.length} sites whose published point lies outside their listed county`)
+      && cov.includes(conflict.name), 'the coverage report lists every such site', `${reg.reports.locations.in_other_county.length} listed`);
+  } else {
+    report.note('no site in this release has a published point outside its listed county');
+  }
+
   // A hospital-operated site links to its main site; the main site lists it back.
-  const op = sites.find((s) => s.type_group === 'extension' && s.main_site_status === 'listed' && s.location_status === 'valid');
+  const op = sites.find((s) => s.type_group === 'extension' && s.main_site_status === 'listed' && s.map_status === 'mapped');
   await page.fill('#hosp-q', op.fac_id); await page.waitForTimeout(150);
   await page.click(`#hosp-rows button[data-fac="${op.fac_id}"]`); await page.waitForTimeout(150);
   const opText = await text(page, '#hosp-detail');

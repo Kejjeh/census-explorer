@@ -85,6 +85,10 @@ def default_rows():
         gen_row("404", "Adult Home"),
         gen_row("505", "Hospital", county=("44", "Saint Lawrence"), lat="44.6", lon="-75.0"),
         gen_row("606", "Off-Campus Emergency Department", main="999", lat="abc", lon="-73"),
+        # The reviewed real pattern (HFIS 15716): listed in Albany, but the
+        # published point lies in another county (here St. Lawrence).
+        gen_row("707", "Mobile Hospital Extension Clinic", "327 Beach 19th Street", main="0101",
+                lat="44.6", lon="-75.0"),
     ]
     cert = [
         cert_row("0101", "Hospital", "Bed", "Intensive Care", "10", "Permanent", "03/21/1988"),
@@ -205,7 +209,7 @@ class RetrievalChecks(unittest.TestCase):
             self.assertEqual(m.inputs["retrieval_config_sha256"], R.canonical_sha256(CFG))
             self.assertEqual(m.verify(root), [])
             self.assertEqual(m.inputs["sources"]["cms_general"]["ny_rows"], 4)
-            self.assertEqual(m.inputs["sources"]["nys_general"]["family_rows"], 7)
+            self.assertEqual(m.inputs["sources"]["nys_general"]["family_rows"], 8)
             self.assertTrue((root / "data/manifests/hospitals-20260101T000000+0000.json").is_file())
             with self.assertRaisesRegex(R.SourceCheckFailed, "immutable"):
                 fetch(root)
@@ -273,7 +277,7 @@ class RegistryBuild(unittest.TestCase):
         self.assertTrue(all(isinstance(k, str) for k in self.sites))
 
     def test_repeated_rows_make_one_site_and_excluded_types_are_counted(self):
-        self.assertEqual(sorted(self.sites), ["0101", "202", "303", "505", "606"])
+        self.assertEqual(sorted(self.sites), ["0101", "202", "303", "505", "606", "707"])
         self.assertEqual(self.sites["0101"]["source_rows"], 2)
         self.assertEqual(self.sites["0101"]["cooperators"], ["Coop A", "Coop B"])
         c = self.reg["reports"]["counts"]
@@ -291,10 +295,10 @@ class RegistryBuild(unittest.TestCase):
         self.assertEqual(self.sites["202"]["main_site_status"], "listed")
         self.assertEqual(self.sites["202"]["type_group"], "extension")
         self.assertEqual(self.sites["606"]["main_site_status"], "not_in_registry")
-        self.assertEqual(self.sites["0101"]["operated_site_count"], 1)
+        self.assertEqual(self.sites["0101"]["operated_site_count"], 2)
 
     def test_certification_rows_are_preserved_without_fan_out(self):
-        self.assertEqual(len(self.reg["sites"]), 5)
+        self.assertEqual(len(self.reg["sites"]), 6)
         self.assertEqual(len(self.cert["sites"]["0101"]), 6)
         c = self.reg["reports"]["counts"]
         self.assertEqual((c["certification_rows_for_sites"], c["certification_rows_other_facilities"],
@@ -343,6 +347,30 @@ class RegistryBuild(unittest.TestCase):
             self.assertTrue(self.sites[fid]["location_reason"])
         unlocated = {u["fac_id"] for u in self.reg["reports"]["locations"]["unlocated"]}
         self.assertEqual(unlocated, {"202", "303", "606"})
+
+    def test_point_outside_listed_county_is_kept_but_not_mapped(self):
+        s = self.sites["707"]
+        # Source county and published coordinates are preserved as published.
+        self.assertEqual((s["county_name"], s["county_fips"], s["hfis_county_code"]), ("Albany", "36001", "1"))
+        self.assertEqual((s["lat"], s["lon"], s["location_status"]), (44.6, -75.0, "valid"))
+        self.assertEqual((s["location_county_check"], s["location_in_county_fips"], s["location_in_county_name"]),
+                         ("in_other_county", "36089", "St. Lawrence"))
+        self.assertEqual(s["map_status"], "not_mapped_county_conflict")
+        self.assertIn("HFIS lists this site in Albany County", s["map_reason"])
+        self.assertIn("lies in St. Lawrence County (FIPS 36089)", s["map_reason"])
+        self.assertIn("geocoded from the mailing address", s["map_reason"])
+        loc = self.reg["reports"]["locations"]
+        self.assertEqual(loc["by_map_status"], {"mapped": 2, "not_mapped_no_location": 3,
+                                                 "not_mapped_county_conflict": 1})
+        self.assertEqual(loc["in_other_county"], [{
+            "fac_id": "707", "name": "Synthetic 707", "listed_county": "Albany", "listed_fips": "36001",
+            "point_county": "St. Lawrence", "point_fips": "36089",
+            "map_status": "not_mapped_county_conflict"}])
+        self.assertEqual({x["fac_id"]: x["map_status"] for x in self.reg["sites"]},
+                         {"0101": "mapped", "202": "not_mapped_no_location",
+                          "303": "not_mapped_no_location", "505": "mapped",
+                          "606": "not_mapped_no_location", "707": "not_mapped_county_conflict"})
+        self.assertEqual(set(H.MAP_STATUSES) >= {x["map_status"] for x in self.reg["sites"]}, True)
 
     def test_county_fips_come_from_census_and_locality_flaw_is_reported(self):
         s = self.sites["505"]
@@ -600,7 +628,7 @@ class PairIntegrity(unittest.TestCase):
 
     def test_consistently_rehashed_but_mismatched_pair_is_refused(self):
         for key, value in (("retrieval_manifest_id", "hospitals-other"), ("rules_sha256", "0" * 64),
-                           ("data_mode", "live"), ("schema_version", 2)):
+                           ("data_mode", "live"), ("schema_version", 99)):
             with self.subTest(key=key), temp_root() as out:
                 H.write_outputs(out, self.reg, {**self.cert, key: value})
                 # write_outputs indexes whatever it is given, so the index is
@@ -676,7 +704,7 @@ class ServiceAndStaticSite(unittest.TestCase):
         self.assertEqual(len(pub["sites"]), len(self.reg["sites"]))
         man = json.loads((self.withh / "data/manifest.json").read_text())["hospitals"]
         self.assertEqual(man["retrieval_manifest_id"], self.reg["retrieval_manifest_id"])
-        self.assertEqual(man["sites"], 5)
+        self.assertEqual(man["sites"], 6)
         self.assertEqual((man["data_mode"], man["rules_sha256"], man["rules_version"]),
                          ("fixture", R.canonical_sha256(RULES), RULES["rules_version"]))
         self.assertEqual(man["retrieval_config_sha256"], R.canonical_sha256(CFG))
