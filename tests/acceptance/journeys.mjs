@@ -565,9 +565,9 @@ async function hospitalLayer(mode, url) {
     `${marks.length} markers; ${expected.length} sites, ${nUnlocated} unlocated, ${nConflict} with a point in another county`);
   const n = (x) => x.toLocaleString('en-US');
   report.check(summary.startsWith(`${n(expected.length)} of ${n(sites.length)} sites match (county = the county HFIS lists).`)
-    && summary.includes(`${n(expectedMapped.length)} are drawn on the map`)
-    && summary.includes(`${n(nUnlocated)} have no published location`)
-    && (!nConflict || summary.includes(`${n(nConflict)} are not drawn because the published point lies outside the listed county`))
+    && summary.includes(`${n(expectedMapped.length)} ${expectedMapped.length === 1 ? 'is' : 'are'} drawn on the map`)
+    && summary.includes(`${n(nUnlocated)} ${nUnlocated === 1 ? 'has' : 'have'} no published location`)
+    && (!nConflict || summary.includes(`${n(nConflict)} ${nConflict === 1 ? 'is' : 'are'} not drawn because the published point lies outside the listed county`))
     && summary.includes('NYSDOH geocodes of each site\'s mailing address'),
   'the directory summary states the same counts, and what the points are', summary);
   const rows = await page.$$eval('#hosp-rows button[data-fac]', (b) => b.map((x) => x.dataset.fac));

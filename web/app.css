@@ -673,7 +673,7 @@ tr.reference-row td { border-bottom: 2px solid var(--line-2); }
 .hosp-summary { margin: var(--s3) 0 var(--s2); font-size: 13px; }
 .hosp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .hosp-table th, .hosp-table td { text-align: left; vertical-align: top; padding: 6px var(--s2);
-  border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  border-bottom: 1px solid var(--line); overflow-wrap: break-word; }
 .hosp-table thead th { font-size: 12px; color: var(--muted); }
 .hosp-table tbody th { font-weight: 400; }
 .hosp-table tr.picked { background: var(--accent-soft); }

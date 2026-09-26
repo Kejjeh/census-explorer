@@ -148,10 +148,10 @@ function mapPlan(filtered, scopeCounties) {
 function planSentence(plan) {
   const n = (x) => x.toLocaleString('en-US');
   return [
-    `${n(plan.drawn.length)} are drawn on the map`,
-    plan.outside ? `${n(plan.outside)} lie in counties outside the mapped area` : '',
-    plan.conflict ? `${n(plan.conflict)} are not drawn because the published point lies outside the listed county` : '',
-    plan.unlocated ? `${n(plan.unlocated)} have no published location` : '',
+    `${n(plan.drawn.length)} ${plan.drawn.length === 1 ? 'is' : 'are'} drawn on the map`,
+    plan.outside ? `${n(plan.outside)} ${plan.outside === 1 ? 'lies' : 'lie'} in counties outside the mapped area` : '',
+    plan.conflict ? `${n(plan.conflict)} ${plan.conflict === 1 ? 'is' : 'are'} not drawn because the published point lies outside the listed county` : '',
+    plan.unlocated ? `${n(plan.unlocated)} ${plan.unlocated === 1 ? 'has' : 'have'} no published location` : '',
   ].filter(Boolean).join('; ') + '. Points are NYSDOH geocodes of each site\'s mailing address, as published.';
 }
 
@@ -487,7 +487,8 @@ function createHospitalLayer() {
       b.addEventListener('click', () => openSite(b.dataset.fac, { focus: true }));
     });
     renderPager('hosp-pager', list.length, hs.page, (p) => { hs.page = p; renderRows(); });
-    $h('hosp-csv').textContent = `Download these ${list.length.toLocaleString('en-US')} sites (CSV)`;
+    $h('hosp-csv').textContent = list.length === 1 ? 'Download this 1 site (CSV)'
+      : `Download these ${list.length.toLocaleString('en-US')} sites (CSV)`;
   }
 
   function renderPager(id, total, page, go) {

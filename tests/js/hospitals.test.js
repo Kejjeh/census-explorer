@@ -152,7 +152,7 @@ test('a point outside its listed county is listed, exported and counted, never d
   assert.strictEqual(H.mapLabel(van), 'Not mapped: published point is in Queens County, not the listed Albany');
   assert.strictEqual(H.mapLabel(sites[0]), 'Mapped');
   assert.match(H.planSentence(H.mapPlan(albany, ['36001'])),
-    /1 are not drawn because the published point lies outside the listed county.*NYSDOH geocodes of each site's mailing address/);
+    /1 is not drawn because the published point lies outside the listed county.*NYSDOH geocodes of each site's mailing address/);
   const lines = H.sitesCsv(albany, { retrieval_manifest_id: 'm', data_mode: 'live', dates: { nys: 'd' } }).trim().split('\r\n');
   assert.strictEqual(lines.length, 1 + albany.length);
   const header = lines[0].split(',');
