@@ -1,0 +1,22 @@
+{
+  "rules_version": 1,
+  "note": "Hospital Explorer phase 1 transformation rules. Changing anything here changes how a retrieval is interpreted: bump rules_version, and expect the registry and every published copy to record the new rules_sha256 (SHA-256 of the canonical JSON of this file).",
+  "county_name_aliases": {
+    "note": "HFIS county name -> the same county's name in each crosswalk source, where the spelling differs. Reviewed spelling differences, not fuzzy matches. FIPS codes come from the Census Bureau's own county list (the cartographic boundary file of the default ACS release); the NYS ITS Locality Hierarchy is an independent cross-check, because on 2026-09-25 it listed St Lawrence County with FIPS 36099, which is Seneca County's code (St Lawrence is 36089).",
+    "Saint Lawrence": {"census": "St. Lawrence", "locality": "St Lawrence"}
+  },
+  "ny_bounds": {
+    "note": "Outer limits of New York State used only to reject impossible coordinates (TIGER state extent, rounded outward). Points inside are still checked against county shapes.",
+    "min_lat": 40.47, "max_lat": 45.02, "min_lon": -79.77, "max_lon": -71.78
+  },
+  "certification": {
+    "conversion_default_date": "2008-12-30",
+    "conversion_note": "NYSDOH: when operating-certificate data moved to HFIS, commencement dates of some hospital services and of D&TC and hospice beds and services defaulted to the conversion date, so effective dates for items approved before December 30, 2008 are not available."
+  },
+  "links": {
+    "nys_profiles_listing": "https://profiles.health.ny.gov/hospital/alpha/",
+    "nys_profiles_note": "NYS Health Profiles identifies hospitals by its own profile numbers, not by HFIS facility IDs, and no official crosswalk was found; this link opens the official A–Z list.",
+    "care_compare_prefix": "https://www.medicare.gov/care-compare/details/hospital/",
+    "care_compare_note": "Care Compare address built from the CMS Certification Number (CCN). The format is CMS's own; the site answers any address, so a link is not proof that a profile exists."
+  }
+}

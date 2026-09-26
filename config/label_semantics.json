@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "note": [
+    "A published cell label changing between releases is either a harmless",
+    "restyling or a change of meaning, and nothing in the data says which.",
+    "This file is where a human records the ones that have been reviewed and",
+    "found harmless. Anything not covered here blocks the comparison until it",
+    "is reviewed, rather than being disclosed and drawn anyway."
+  ],
+  "normalisation_rules": [
+    {
+      "id": "case",
+      "description": "Letter case only.",
+      "reviewed_on": "2026-09-20"
+    },
+    {
+      "id": "whitespace",
+      "description": "Leading, trailing or repeated whitespace only.",
+      "reviewed_on": "2026-09-20"
+    },
+    {
+      "id": "trailing_colon",
+      "description": "A trailing colon on a hierarchy heading.",
+      "reviewed_on": "2026-09-20"
+    },
+    {
+      "id": "hyphen_space",
+      "description": "A hyphen written as a space or vice versa, as in 'Foreign-born' and 'Foreign born'. Reviewed against the 2022 and 2023 ACS five-year releases of B05002, where the universe, the table position and the published estimate are unchanged.",
+      "reviewed_on": "2026-09-20"
+    },
+    {
+      "id": "unicode_punctuation",
+      "description": "A typographic dash or apostrophe written as its ASCII equivalent.",
+      "reviewed_on": "2026-09-20"
+    },
+    {
+      "id": "abbreviation_dots",
+      "description": "Dots in an abbreviation, as in 'U.S.' and 'US'.",
+      "reviewed_on": "2026-09-20"
+    }
+  ],
+  "reviewed_equivalences": []
+}

@@ -1,0 +1,1073 @@
+{
+  "schema_version": 1,
+  "note": "Every measure names its numerator cells, denominator cells and universe. Cell codes were resolved against the official release metadata; run 'python -m census_explorer.cli catalog verify' to re-check them against a release.",
+  "measures": [
+    {
+      "measure_id": "total_population",
+      "label": "Total population",
+      "concept": "Population size",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B01003_001"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Total population.",
+      "definition_note": "Total population of the area, ACS period estimate.",
+      "caveats": [
+        "The published margin of error is annotated as controlled for many county totals; an annotated margin of error is not a margin of error of zero."
+      ],
+      "topics": [
+        "population"
+      ]
+    },
+    {
+      "measure_id": "foreign_born_population",
+      "label": "Foreign-born population",
+      "concept": "Nativity",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05002_013"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Total population (B05002).",
+      "definition_note": "Residents who were not U.S. citizens at birth.",
+      "caveats": [
+        "People born in Puerto Rico and other U.S. island areas are native-born, not foreign-born, and are counted in B05002 'Native; born outside the United States'.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "nativity",
+        "immigration",
+        "population"
+      ]
+    },
+    {
+      "measure_id": "foreign_born_share",
+      "label": "Foreign-born share of population",
+      "concept": "Nativity",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05002_013"
+      ],
+      "denominator_cells": [
+        "B05002_001"
+      ],
+      "universe_note": "Total population (B05002).",
+      "definition_note": "Foreign-born residents as a percentage of all residents.",
+      "caveats": [
+        "People born in Puerto Rico and other U.S. island areas are native-born, not foreign-born, and are counted in B05002 'Native; born outside the United States'.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "nativity",
+        "immigration"
+      ]
+    },
+    {
+      "measure_id": "born_in_state_of_residence_share",
+      "label": "Born in New York State, share of population",
+      "concept": "Nativity",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05002_003"
+      ],
+      "denominator_cells": [
+        "B05002_001"
+      ],
+      "universe_note": "Total population (B05002).",
+      "definition_note": "Residents born in their state of residence, as a percentage of all residents.",
+      "caveats": [
+        "'Born in state of residence' means born in New York State. It does not identify people born in New York City."
+      ],
+      "topics": [
+        "nativity",
+        "population"
+      ]
+    },
+    {
+      "measure_id": "born_other_us_state_share",
+      "label": "Born in another U.S. state, share of population",
+      "concept": "Nativity",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05002_004"
+      ],
+      "denominator_cells": [
+        "B05002_001"
+      ],
+      "universe_note": "Total population (B05002).",
+      "definition_note": "Residents born in a U.S. state other than their state of residence.",
+      "caveats": [
+        "This is a birthplace stock, not a measure of recent in-migration. It does not record when a person arrived, or whether they ever left and returned."
+      ],
+      "topics": [
+        "nativity",
+        "migration"
+      ]
+    },
+    {
+      "measure_id": "native_born_outside_us_share",
+      "label": "Native, born outside the United States, share of population",
+      "concept": "Nativity",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05002_009"
+      ],
+      "denominator_cells": [
+        "B05002_001"
+      ],
+      "universe_note": "Total population (B05002).",
+      "definition_note": "U.S. citizens at birth who were born outside the 50 states and D.C.",
+      "caveats": [
+        "People born in Puerto Rico and other U.S. island areas are native-born, not foreign-born, and are counted in B05002 'Native; born outside the United States'."
+      ],
+      "topics": [
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "naturalized_share_of_foreign_born",
+      "label": "Naturalized citizens, share of the foreign-born population",
+      "concept": "Citizenship",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05002_014"
+      ],
+      "denominator_cells": [
+        "B05002_013"
+      ],
+      "universe_note": "Foreign-born population (B05002).",
+      "definition_note": "Foreign-born residents who have naturalized, as a percentage of all foreign-born residents.",
+      "caveats": [
+        "Naturalization depends on length of residence and eligibility; a low share can reflect recent arrival, eligibility rules, or both."
+      ],
+      "topics": [
+        "citizenship",
+        "immigration"
+      ]
+    },
+    {
+      "measure_id": "fb_dominican_republic_count",
+      "label": "Foreign-born population born in Dominican Republic",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_145"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Dominican Republic who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_dominican_republic_share_of_foreign_born",
+      "label": "Born in Dominican Republic, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_145"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Dominican Republic as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_china_count",
+      "label": "Foreign-born population born in China (including Hong Kong and Taiwan)",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_049"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in China (including Hong Kong and Taiwan) who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "The published category 'China:' includes China excluding Hong Kong and Taiwan, Hong Kong, and Taiwan. Do not relabel it 'mainland China'."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_china_share_of_foreign_born",
+      "label": "Born in China (including Hong Kong and Taiwan), share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_049"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in China (including Hong Kong and Taiwan) as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
+        "The published category 'China:' includes China excluding Hong Kong and Taiwan, Hong Kong, and Taiwan. Do not relabel it 'mainland China'."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_mexico_count",
+      "label": "Foreign-born population born in Mexico",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_160"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Mexico who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_mexico_share_of_foreign_born",
+      "label": "Born in Mexico, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_160"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Mexico as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_jamaica_count",
+      "label": "Foreign-born population born in Jamaica",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_148"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Jamaica who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_jamaica_share_of_foreign_born",
+      "label": "Born in Jamaica, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_148"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Jamaica as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_ecuador_count",
+      "label": "Foreign-born population born in Ecuador",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_170"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Ecuador who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_ecuador_share_of_foreign_born",
+      "label": "Born in Ecuador, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_170"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Ecuador as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_guyana_count",
+      "label": "Foreign-born population born in Guyana",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_171"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Guyana who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_guyana_share_of_foreign_born",
+      "label": "Born in Guyana, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_171"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Guyana as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_bangladesh_count",
+      "label": "Foreign-born population born in Bangladesh",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_058"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Bangladesh who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_bangladesh_share_of_foreign_born",
+      "label": "Born in Bangladesh, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_058"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Bangladesh as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_india_count",
+      "label": "Foreign-born population born in India",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_060"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in India who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_india_share_of_foreign_born",
+      "label": "Born in India, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_060"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in India as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_haiti_count",
+      "label": "Foreign-born population born in Haiti",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_147"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Haiti who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_haiti_share_of_foreign_born",
+      "label": "Born in Haiti, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_147"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Haiti as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_italy_count",
+      "label": "Foreign-born population born in Italy",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_023"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Italy who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_italy_share_of_foreign_born",
+      "label": "Born in Italy, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_023"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Italy as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_poland_count",
+      "label": "Foreign-born population born in Poland",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_040"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Poland who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Birthplace is recorded against present-day country names. Borders in this part of Europe changed during the lifetimes of many respondents."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_poland_share_of_foreign_born",
+      "label": "Born in Poland, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_040"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Poland as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
+        "Birthplace is recorded against present-day country names. Borders in this part of Europe changed during the lifetimes of many respondents."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_caribbean_count",
+      "label": "Foreign-born population born in the Caribbean",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_140"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in the Caribbean who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "A regional subtotal. Overlaps the individual Caribbean countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_caribbean_share_of_foreign_born",
+      "label": "Born in the Caribbean, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_140"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in the Caribbean as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
+        "A regional subtotal. Overlaps the individual Caribbean countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_europe_count",
+      "label": "Foreign-born population born in Europe",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_002"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Europe who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "A continental subtotal; overlaps the countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_europe_share_of_foreign_born",
+      "label": "Born in Europe, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_002"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Europe as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
+        "A continental subtotal; overlaps the countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_asia_count",
+      "label": "Foreign-born population born in Asia",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_047"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Asia who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "A continental subtotal; overlaps the countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_asia_share_of_foreign_born",
+      "label": "Born in Asia, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_047"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Asia as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
+        "A continental subtotal; overlaps the countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_africa_count",
+      "label": "Foreign-born population born in Africa",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_095"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Africa who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "A continental subtotal; overlaps the countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_africa_share_of_foreign_born",
+      "label": "Born in Africa, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_095"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Africa as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
+        "A continental subtotal; overlaps the countries listed separately."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_latin_america_count",
+      "label": "Foreign-born population born in Latin America",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B05006_139"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Latin America who were not U.S. citizens at birth.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "A regional subtotal; overlaps the Caribbean, Central American and South American entries."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "fb_latin_america_share_of_foreign_born",
+      "label": "Born in Latin America, share of the foreign-born population",
+      "concept": "Place of birth of the foreign-born population",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B05006_139"
+      ],
+      "denominator_cells": [
+        "B05006_001"
+      ],
+      "universe_note": "Foreign-born population excluding population born at sea (B05006 universe). This universe is slightly narrower than the foreign-born population in B05002, so the two totals need not match exactly.",
+      "definition_note": "Residents born in Latin America as a percentage of the foreign-born population in the same table and universe.",
+      "caveats": [
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown.",
+        "Denominator is B05006 total, not the B05002 foreign-born total, because the two universes differ.",
+        "A regional subtotal; overlaps the Caribbean, Central American and South American entries."
+      ],
+      "topics": [
+        "birthplace",
+        "immigration",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "adults_25_plus_population",
+      "label": "Population 25 years and over",
+      "concept": "Educational attainment by place of birth",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B06009_001"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Population 25 years and over in the United States (B06009).",
+      "definition_note": "Residents aged 25 and over.",
+      "topics": [
+        "education",
+        "population"
+      ],
+      "caveats": []
+    },
+    {
+      "measure_id": "bachelors_plus_share_all",
+      "label": "Bachelor's degree or higher, share of all adults 25 and over",
+      "concept": "Educational attainment by place of birth",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B06009_005",
+        "B06009_006"
+      ],
+      "denominator_cells": [
+        "B06009_001"
+      ],
+      "universe_note": "Population 25 years and over in the United States (B06009).",
+      "definition_note": "Share of all adults 25 and over whose highest attainment is a bachelor's, graduate or professional degree.",
+      "caveats": [
+        "'Bachelor's degree or higher' sums the bachelor's and graduate/professional categories. The universe is adults 25 and over, not all residents."
+      ],
+      "topics": [
+        "education",
+        "nativity"
+      ]
+    },
+    {
+      "measure_id": "bachelors_plus_share_foreign_born",
+      "label": "Bachelor's degree or higher, share of foreign-born adults 25 and over",
+      "concept": "Educational attainment by place of birth",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B06009_029",
+        "B06009_030"
+      ],
+      "denominator_cells": [
+        "B06009_025"
+      ],
+      "universe_note": "Population 25 years and over in the United States (B06009).",
+      "definition_note": "Share of foreign-born adults 25 and over whose highest attainment is a bachelor's, graduate or professional degree.",
+      "caveats": [
+        "'Bachelor's degree or higher' sums the bachelor's and graduate/professional categories. The universe is adults 25 and over, not all residents."
+      ],
+      "topics": [
+        "education",
+        "nativity",
+        "birthplace"
+      ]
+    },
+    {
+      "measure_id": "bachelors_plus_share_born_in_state",
+      "label": "Bachelor's degree or higher, share of adults 25 and over born in New York State",
+      "concept": "Educational attainment by place of birth",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B06009_011",
+        "B06009_012"
+      ],
+      "denominator_cells": [
+        "B06009_007"
+      ],
+      "universe_note": "Population 25 years and over in the United States (B06009).",
+      "definition_note": "Share of adults 25 and over born in New York State whose highest attainment is a bachelor's, graduate or professional degree.",
+      "caveats": [
+        "'Bachelor's degree or higher' sums the bachelor's and graduate/professional categories. The universe is adults 25 and over, not all residents.",
+        "'Born in state of residence' means born in New York State. It does not identify people born in New York City."
+      ],
+      "topics": [
+        "education",
+        "nativity",
+        "birthplace"
+      ]
+    },
+    {
+      "measure_id": "bachelors_plus_share_born_other_state",
+      "label": "Bachelor's degree or higher, share of adults 25 and over born in another U.S. state",
+      "concept": "Educational attainment by place of birth",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B06009_017",
+        "B06009_018"
+      ],
+      "denominator_cells": [
+        "B06009_013"
+      ],
+      "universe_note": "Population 25 years and over in the United States (B06009).",
+      "definition_note": "Share of adults 25 and over born in another U.S. state whose highest attainment is a bachelor's, graduate or professional degree.",
+      "caveats": [
+        "'Bachelor's degree or higher' sums the bachelor's and graduate/professional categories. The universe is adults 25 and over, not all residents.",
+        "A birthplace category, not a recent-arrival category. Do not describe it as 'transplants' without stating the age universe and that it is a stock."
+      ],
+      "topics": [
+        "education",
+        "nativity",
+        "birthplace"
+      ]
+    },
+    {
+      "measure_id": "black_alone_population",
+      "label": "Black or African American alone population",
+      "concept": "Place of birth by race",
+      "unit": "persons",
+      "kind": "count",
+      "numerator_cells": [
+        "B06004B_001"
+      ],
+      "denominator_cells": [],
+      "universe_note": "Black or African American alone population in the United States (B06004B).",
+      "definition_note": "Residents reporting Black or African American alone.",
+      "caveats": [
+        "This table crosses place of birth with race only at the broadest birthplace level. It cannot identify Caribbean-born Black residents; that intersection is not published in B05006 or B06004B."
+      ],
+      "topics": [
+        "race",
+        "population"
+      ]
+    },
+    {
+      "measure_id": "black_alone_foreign_born_share",
+      "label": "Foreign born, share of the Black or African American alone population",
+      "concept": "Place of birth by race",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B06004B_005"
+      ],
+      "denominator_cells": [
+        "B06004B_001"
+      ],
+      "universe_note": "Black or African American alone population in the United States (B06004B).",
+      "definition_note": "Foreign-born residents as a percentage of the Black alone population.",
+      "caveats": [
+        "This table crosses place of birth with race only at the broadest birthplace level. It cannot identify Caribbean-born Black residents; that intersection is not published in B05006 or B06004B.",
+        "A birthplace count is a stock: how many residents were born in that place. It is not a count of recent arrivals and says nothing about when or whether a person moved to the place shown."
+      ],
+      "topics": [
+        "race",
+        "nativity",
+        "immigration"
+      ]
+    },
+    {
+      "measure_id": "black_alone_born_in_state_share",
+      "label": "Born in New York State, share of the Black or African American alone population",
+      "concept": "Place of birth by race",
+      "unit": "percent",
+      "kind": "share",
+      "numerator_cells": [
+        "B06004B_002"
+      ],
+      "denominator_cells": [
+        "B06004B_001"
+      ],
+      "universe_note": "Black or African American alone population in the United States (B06004B).",
+      "definition_note": "Residents born in their state of residence as a percentage of the Black alone population.",
+      "caveats": [
+        "This table crosses place of birth with race only at the broadest birthplace level. It cannot identify Caribbean-born Black residents; that intersection is not published in B05006 or B06004B.",
+        "'Born in state of residence' means born in New York State. It does not identify people born in New York City."
+      ],
+      "topics": [
+        "race",
+        "nativity"
+      ]
+    }
+  ]
+}

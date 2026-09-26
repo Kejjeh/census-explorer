@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "rule": [
+    "Two releases may only be compared area by area when the areas are established",
+    "to be the same ground. A shared GEOID is not that evidence: identifiers are",
+    "reused across vintages even when a boundary moves.",
+    "",
+    "Equivalence can be established in exactly three ways:",
+    "",
+    "  1. Same boundary vintage. The areas are identical by construction.",
+    "",
+    "  2. Documented provider correspondence: a statement from the data provider",
+    "     that the areas in the two vintages correspond, recorded below with the",
+    "     document it rests on.",
+    "",
+    "  3. Scoped reviewed evidence: a human examined specific areas and recorded",
+    "     what they examined, when, and which areas the finding covers.",
+    "",
+    "A computed footprint comparison is NOT one of these ways. It is a measurement.",
+    "It can show decisively that two renderings disagree, but two renderings",
+    "agreeing within a tolerance does not show that the provider defines them as",
+    "the same area, and summary statistics are weaker still: a square and a",
+    "diamond of equal area about the same point agree on area and centroid while",
+    "describing different ground. Run it to inform a review, not to replace one:",
+    "",
+    "    python -m census_explorer.cli geography footprint --a <release> --b <release> --level <level>",
+    "",
+    "With no record below, every cross-vintage comparison is refused. That is the",
+    "intended default. Single-period exploration, and comparison between places",
+    "within one release, are unaffected."
+  ],
+  "footprint_comparison": {
+    "purpose": "measurement only; never establishes equivalence",
+    "method": [
+      "For each area the two vintages share, the greatest distance from either",
+      "boundary's vertices to the other boundary, computed on the published",
+      "cartographic geometry with a shared projection origin, together with the",
+      "relative difference in area.",
+      "",
+      "Vertex-to-boundary distance is a lower bound on the true Hausdorff distance",
+      "between the boundaries. It is close for densely sampled published polygons",
+      "and it cannot be fooled by two different shapes that happen to share an",
+      "area and a centroid."
+    ],
+    "tolerances": {
+      "max_relative_area_difference": 0.001,
+      "max_boundary_distance_metres": 25.0,
+      "note": [
+        "These bound what the measurement calls agreement. They are this",
+        "project's choice, not a Census Bureau standard, and agreement within",
+        "them still does not establish equivalence."
+      ]
+    }
+  },
+  "provider_correspondence": [],
+  "reviewed_equivalences": []
+}

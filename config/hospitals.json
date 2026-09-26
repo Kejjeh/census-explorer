@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "note": "Hospital Explorer phase 1 retrieval configuration: sources, documents and the hospital-family types the provider counts at retrieval. Every URL is a keyless public endpoint; retrieval happens only in 'hospitals fetch'. Expected headers are the exact CSV header rows observed on 2026-09-25; any difference stops retrieval and build (schema drift). A hash of this configuration (canonical JSON) is pinned in each retrieval manifest, and a build refuses a retrieval whose configuration has since changed. Transformation rules live in config/hospital_rules.json.",
+  "sources": {
+    "cms_general": {
+      "title": "Hospital General Information",
+      "publisher": "Centers for Medicare & Medicaid Services (CMS)",
+      "dataset_id": "xubh-q36u",
+      "kind": "cms_provider_data",
+      "metastore_url": "https://data.cms.gov/provider-data/api/1/metastore/schemas/dataset/items/xubh-q36u",
+      "landing_page": "https://data.cms.gov/provider-data/dataset/xubh-q36u",
+      "count_url": "https://data.cms.gov/provider-data/api/1/datastore/query/xubh-q36u/0?count=true&results=false",
+      "ny_count_url": "https://data.cms.gov/provider-data/api/1/datastore/query/xubh-q36u/0?count=true&results=false&conditions%5B0%5D%5Bproperty%5D=state&conditions%5B0%5D%5Bvalue%5D=NY&conditions%5B0%5D%5Boperator%5D=%3D",
+      "archive_dictionary": true,
+      "expected_header": ["Facility ID", "Facility Name", "Address", "City/Town", "State", "ZIP Code", "County/Parish", "Telephone Number", "Hospital Type", "Hospital Ownership", "Emergency Services", "Meets criteria for birthing friendly designation", "Hospital overall rating", "Hospital overall rating footnote", "MORT Group Measure Count", "Count of Facility MORT Measures", "Count of MORT Measures Better", "Count of MORT Measures No Different", "Count of MORT Measures Worse", "MORT Group Footnote", "Safety Group Measure Count", "Count of Facility Safety Measures", "Count of Safety Measures Better", "Count of Safety Measures No Different", "Count of Safety Measures Worse", "Safety Group Footnote", "READM Group Measure Count", "Count of Facility READM Measures", "Count of READM Measures Better", "Count of READM Measures No Different", "Count of READM Measures Worse", "READM Group Footnote", "Pt Exp Group Measure Count", "Count of Facility Pt Exp Measures", "Pt Exp Group Footnote", "TE Group Measure Count", "Count of Facility TE Measures", "TE Group Footnote"],
+      "terms": "Published by a US federal agency on the CMS Provider Data Catalog. The dataset metadata declares accessLevel 'public' and carries no license field; no dataset-specific terms page was found."
+    },
+    "cms_footnotes": {
+      "title": "Footnote Crosswalk",
+      "publisher": "Centers for Medicare & Medicaid Services (CMS)",
+      "dataset_id": "y9us-9xdf",
+      "kind": "cms_provider_data",
+      "metastore_url": "https://data.cms.gov/provider-data/api/1/metastore/schemas/dataset/items/y9us-9xdf",
+      "landing_page": "https://data.cms.gov/provider-data/dataset/y9us-9xdf",
+      "count_url": "https://data.cms.gov/provider-data/api/1/datastore/query/y9us-9xdf/0?count=true&results=false",
+      "archive_dictionary": false,
+      "expected_header": ["Footnote", "Footnote Text"],
+      "terms": "As for Hospital General Information."
+    },
+    "nys_general": {
+      "title": "Health Facility General Information",
+      "publisher": "New York State Department of Health",
+      "dataset_id": "vn5v-hh5r",
+      "kind": "socrata",
+      "domain": "health.data.ny.gov",
+      "landing_page": "https://health.data.ny.gov/d/vn5v-hh5r",
+      "expected_header": ["Facility ID", "Facility Name", "Short Description", "Description", "Facility Open Date", "Facility Address 1", "Facility Address 2", "Facility City", "Facility State", "Facility Zip Code", "Facility Phone Number", "Facility Fax Number", "Facility Website", "Facility County Code", "Facility County", "Regional Office ID", "Regional Office", "Main Site Name", "Main Site Facility ID", "Operating Certificate Number", "Operator Name", "Operator Address 1", "Operator Address 2", "Operator City", "Operator State", "Operator Zip Code", "Cooperator Name", "Cooperator Address", "Cooperator Address 2", "Cooperator City", "Cooperator State", "Cooperator Zip Code", "Ownership Type", "Facility Latitude", "Facility Longitude", "Facility Location"],
+      "filter_field": "description",
+      "terms": "Open NY terms of use (archived as terms:open_ny). Attribution: New York State Department of Health."
+    },
+    "nys_certification": {
+      "title": "Health Facility Certification Information",
+      "publisher": "New York State Department of Health",
+      "dataset_id": "2g9y-7kqm",
+      "kind": "socrata",
+      "domain": "health.data.ny.gov",
+      "landing_page": "https://health.data.ny.gov/d/2g9y-7kqm",
+      "expected_header": ["Facility ID", "Facility Name", "Description", "Short Description", "Attribute Type", "Attribute Value", "Measure Value", "Sub Type", "County", "Regional Office", "Effective Date"],
+      "filter_field": "description",
+      "terms": "Open NY terms of use (archived as terms:open_ny). Attribution: New York State Department of Health."
+    },
+    "locality": {
+      "title": "New York State Locality Hierarchy with Websites",
+      "publisher": "NYS Office of Information Technology Services",
+      "dataset_id": "55k6-h6qq",
+      "kind": "socrata",
+      "domain": "data.ny.gov",
+      "landing_page": "https://data.ny.gov/d/55k6-h6qq",
+      "expected_header": ["SWIS Code", "Type Code", "Type", "County Name", "City Name", "Town Name", "Village Name", "2nd County", "Website", "Municipality", "GNIS ID", "State FIPS", "County Code", "County FIPS"],
+      "terms": "Open NY terms of use (archived as terms:open_ny)."
+    }
+  },
+  "documents": {
+    "open_ny_terms": {
+      "title": "Open NY Terms of Use (PDF)",
+      "url": "https://data.ny.gov/download/77gx-ii52/application/pdf"
+    }
+  },
+  "hospital_family": {
+    "note": "HFIS 'Description' values in scope. The General dataset's own metadata says it covers hospitals and extension clinics, but the file holds 23 facility types; every other type is excluded and counted.",
+    "main_site_types": ["Hospital", "Primary Care Hospital - Critical Access Hospital", "Rural Emergency Hospital"],
+    "hospital_operated_types": ["Hospital Extension Clinic", "School Based Hospital Extension Clinic", "Mobile Hospital Extension Clinic", "Primary Care Hospital - Critical Access Hospital Extension Clinic", "School Based Primary Care Hospital - Critical Access Extension Clinic", "Rural Emergency Hospital Extension Clinic", "Off-Campus Emergency Department"]
+  }
+}
