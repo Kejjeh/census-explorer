@@ -161,3 +161,13 @@ test('a point outside its listed county is listed, exported and counted, never d
   assert.ok(row.includes(',36081,Queens,not_mapped_county_conflict,'), 'point county and map status exported');
   assert.ok(header.includes('map_status') && header.includes('map_reason') && header.includes('hfis_county_name'));
 });
+
+test('an extension site at a CCN address is never labelled a candidate', () => {
+  assert.strictEqual(H.candidateText({ ccn: '330395', state: 'candidate', role: 'same_address_extension_site' }),
+    'same address only; not a candidate');
+  assert.strictEqual(H.candidateText({ ccn: '330395', state: 'candidate', role: 'hospital_candidate' }),
+    'Candidate (unreviewed)');
+  const csv = H.sitesCsv([site('15716', { cms_candidates: [{ ccn: '330395', state: 'candidate', role: 'same_address_extension_site' }] })],
+    { retrieval_manifest_id: 'm', data_mode: 'live', dates: { nys: 'd' } });
+  assert.ok(csv.includes('330395 (same address only; not a candidate)'));
+});

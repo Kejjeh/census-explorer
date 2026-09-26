@@ -598,8 +598,12 @@ def build_registry(inputs: dict, cfg: dict, *, rules: dict | None = None,
                 "No HFIS hospital-family site has this normalized address and ZIP.")
     ent_state = {e["ccn"]: e["hfis_match_state"] for e in entities}
     for s in sites:
+        # A CCN's state describes its hospital candidates. An extension site at
+        # the same address is evidence only, never itself a candidate.
         s["cms_candidates"] = [
-            {"ccn": e["ccn"], "state": e["hfis_match_state"]}
+            {"ccn": e["ccn"], "state": e["hfis_match_state"],
+             "role": ("hospital_candidate" if c["type_group"] == "hospital"
+                      else "same_address_extension_site")}
             for e in entities for c in e["hfis_candidates"] if c["fac_id"] == s["fac_id"]]
 
     # ---- reports -----------------------------------------------------------

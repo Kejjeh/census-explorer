@@ -55,6 +55,12 @@ const MAIN_SITE_TEXT = {
   not_listed: 'HFIS lists no main site for this site.',
 };
 
+/** How one CCN relates to one site: only a hospital can be a candidate. */
+function candidateText(c) {
+  return c.role === 'same_address_extension_site'
+    ? 'same address only; not a candidate' : MATCH_TEXT[c.state];
+}
+
 const MATCH_TEXT = {
   candidate: 'Candidate (unreviewed)',
   ambiguous: 'Ambiguous',
@@ -214,7 +220,7 @@ function sitesCsv(list, registry) {
       // sub type, raw and parsed date, date note. Never a total.
       JSON.stringify(s.certified_beds || []),
       s.certification_rows,
-      (s.cms_candidates || []).map((c) => `${c.ccn} (${c.state})`).join('; '),
+      (s.cms_candidates || []).map((c) => `${c.ccn} (${candidateText(c)})`).join('; '),
       s.open_date_raw, updated, registry.data_mode, registry.retrieval_manifest_id,
       registry.rules_version, registry.rules_sha256,
     ].map(hospCsvField).join(','));
@@ -481,7 +487,7 @@ function createHospitalLayer() {
         <td data-label="Type">${hEsc(s.type)}${s.type !== GROUP_LABEL[s.type_group] ? `<br><span class="muted tiny">${hEsc(GROUP_LABEL[s.type_group])}</span>` : ''}</td>
         <td data-label="County">${hEsc(s.county_name)}</td>
         <td data-label="Location"${s.map_status === 'mapped' ? '' : ' class="hosp-unmapped"'}>${hEsc(mapLabel(s))}</td>
-        <td data-label="CMS entity candidate">${(s.cms_candidates || []).map((c) => `${hEsc(c.ccn)} <span class="muted tiny">${hEsc(MATCH_TEXT[c.state])}</span>`).join('<br>') || '<span class="muted">none</span>'}</td>
+        <td data-label="CMS entity candidate">${(s.cms_candidates || []).map((c) => `${hEsc(c.ccn)} <span class="muted tiny">${hEsc(candidateText(c))}</span>`).join('<br>') || '<span class="muted">none</span>'}</td>
       </tr>`).join('') || '<tr><td colspan="5">No site matches these filters.</td></tr>';
     $h('hosp-rows').querySelectorAll('button[data-fac]').forEach((b) => {
       b.addEventListener('click', () => openSite(b.dataset.fac, { focus: true }));
@@ -600,7 +606,7 @@ function createHospitalLayer() {
       ? ` The NYS Locality Hierarchy gives ${hEsc(s.locality_fips || 'no code')} here (${hEsc(s.locality_check.replace(/_/g, ' '))}); the Census code is used.` : '';
     const cands = (s.cms_candidates || []).map((c) => (
       `<li><button type="button" class="linkish" data-open-ccn="${hEsc(c.ccn)}">CCN ${hEsc(c.ccn)}</button>: ` +
-      `${hEsc(MATCH_TEXT[c.state])}</li>`)).join('');
+      `${hEsc(candidateText(c))}</li>`)).join('');
     return `
       <h3>${hEsc(s.name)}</h3>
       <p>${hEsc(s.type)}${s.type !== GROUP_LABEL[s.type_group] ? ` · <strong>${hEsc(GROUP_LABEL[s.type_group])}</strong>` : ''}</p>
@@ -736,7 +742,7 @@ if (typeof module === 'object' && module.exports) {
   module.exports = {
     filterSites, facets, mapPlan, sitesCsv, hospCsvField, ratingSummary,
     safeOfficialUrl, careCompareUrl, hEsc, SITE_CSV_COLUMNS, checkPair, modeWarning,
-    mapLabel, planSentence,
+    mapLabel, planSentence, candidateText,
   };
 } else if (typeof window !== 'undefined') {
   window.HospitalLayer = createHospitalLayer();

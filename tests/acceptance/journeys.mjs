@@ -623,6 +623,10 @@ async function hospitalLayer(mode, url) {
     await page.fill('#hosp-q', conflict.fac_id); await page.waitForTimeout(150);
     const cell = await text(page, `#hosp-rows tr:has(button[data-fac="${conflict.fac_id}"]) td[data-label="Location"]`);
     const label = `Not mapped: published point is in ${conflict.location_in_county_name} County, not the listed ${conflict.county_name}`;
+    const cmsCell = await text(page, `#hosp-rows tr:has(button[data-fac="${conflict.fac_id}"]) td[data-label="CMS entity candidate"]`);
+    const extRoles = (conflict.cms_candidates || []).filter((c) => c.role === 'same_address_extension_site');
+    report.check(extRoles.every((c) => cmsCell.includes(`${c.ccn} same address only; not a candidate`)) && !(conflict.type_group === 'extension' && /Candidate/.test(cmsCell)),
+      'an extension site that shares a CMS entity\'s address is shown as "same address only", never as that entity\'s candidate', cmsCell || 'none');
     await page.click(`#hosp-rows button[data-fac="${conflict.fac_id}"]`); await page.waitForTimeout(150);
     const cdet = await text(page, '#hosp-detail');
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#hosp-csv')]);

@@ -87,7 +87,9 @@ def default_rows():
         gen_row("606", "Off-Campus Emergency Department", main="999", lat="abc", lon="-73"),
         # The reviewed real pattern (HFIS 15716): listed in Albany, but the
         # published point lies in another county (here St. Lawrence).
-        gen_row("707", "Mobile Hospital Extension Clinic", "327 Beach 19th Street", main="0101",
+        # Like 15716 it also shares its street address with a CMS entity whose
+        # hospital candidate is another site (0101).
+        gen_row("707", "Mobile Hospital Extension Clinic", "100 Main St", main="0101",
                 lat="44.6", lon="-75.0"),
     ]
     cert = [
@@ -372,6 +374,13 @@ class RegistryBuild(unittest.TestCase):
                           "606": "not_mapped_no_location", "707": "not_mapped_county_conflict"})
         self.assertEqual(set(H.MAP_STATUSES) >= {x["map_status"] for x in self.reg["sites"]}, True)
 
+    def test_extension_site_at_a_ccn_address_is_evidence_not_a_candidate(self):
+        self.assertEqual(self.sites["707"]["cms_candidates"],
+                         [{"ccn": "330001", "state": "candidate", "role": "same_address_extension_site"}])
+        self.assertEqual(self.sites["0101"]["cms_candidates"],
+                         [{"ccn": "330001", "state": "candidate", "role": "hospital_candidate"}])
+        self.assertEqual(self.ents["330001"]["hfis_match_state"], "candidate")
+
     def test_county_fips_come_from_census_and_locality_flaw_is_reported(self):
         s = self.sites["505"]
         self.assertEqual((s["county_fips"], s["county_crosswalk"]), ("36089", "reviewed_alias"))
@@ -383,7 +392,8 @@ class RegistryBuild(unittest.TestCase):
 
     def test_ccn_candidates_are_evidence_never_matches(self):
         self.assertEqual(self.ents["330001"]["hfis_match_state"], "candidate")
-        self.assertEqual(self.ents["330001"]["hfis_candidates"][0]["fac_id"], "0101")
+        cands = {c["fac_id"]: c["type_group"] for c in self.ents["330001"]["hfis_candidates"]}
+        self.assertEqual(cands, {"0101": "hospital", "707": "extension"})
         self.assertEqual(self.ents["330002"]["hfis_match_state"], "ambiguous")
         self.assertEqual(self.ents["330003"]["hfis_match_state"], "ambiguous")
         self.assertEqual(self.ents["33009F"]["hfis_match_state"], "unresolved")
@@ -394,8 +404,8 @@ class RegistryBuild(unittest.TestCase):
         for s in self.reg["sites"]:
             self.assertFalse({"overall_rating", "overall_rating_raw"} & set(s))
         self.assertEqual(self.sites["303"]["cms_candidates"],
-                         [{"ccn": "330002", "state": "ambiguous"},
-                          {"ccn": "330003", "state": "ambiguous"}])
+                         [{"ccn": "330002", "state": "ambiguous", "role": "hospital_candidate"},
+                          {"ccn": "330003", "state": "ambiguous", "role": "hospital_candidate"}])
 
     def test_ratings_keep_footnotes_and_unavailable_is_not_zero(self):
         va = self.ents["33009F"]
