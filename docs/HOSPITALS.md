@@ -2,7 +2,8 @@
 
 Status: **built and checked locally, not published.** The static site still
 serves the census-only publication (`gh-pages` `eb96a10`). No CMS or NYS
-hospital data has been deployed. This phase stops here for independent review.
+hospital data has been deployed. A reviewable release candidate is described
+under "Release candidate"; publication waits for independent acceptance.
 
 The phase adds an optional hospital layer and directory to the explorer:
 - **HFIS sites.** Hospitals and their extension sites, as licensed by the
@@ -173,8 +174,36 @@ Retrieval stops, and keeps nothing, if any check fails. Files are staged in a
     directory and the CSV with the reason.
   - Each located point is checked against the Census county shapes:
     - 1,517 fall in the listed county;
-    - 48 fall in another county, mostly near a county line. These are
-      reported and drawn as published.
+    - 48 fall in another county. For example, HFIS 15716 (SJEH Mobile
+      Health Van) is listed in Albany; its address is in Far Rockaway, and
+      its published point lies in Queens.
+- **Map contract** (`map_status`, registry schema 2).
+  - **County filters** use the county HFIS lists, as published. It is never
+    relabelled, even when the address or point suggests another county.
+  - **The map** draws a site only when its published point lies inside
+    that listed county (`mapped`, 1,517 sites).
+  - **Sites not drawn** stay in the directory and the CSV with a
+    controlled status and a sentence:
+    - `not_mapped_county_conflict` (48): the point lies in another county.
+      The table says, for example, "Not mapped: published point is in Queens
+      County, not the listed Albany". The details name both counties and the
+      FIPS code. The CSV carries `hfis_county_name`, `county_fips`,
+      `point_county_fips`, `point_county_name`, `map_status`, `map_reason`
+      and the published coordinates.
+    - `not_mapped_no_location` (14): no usable coordinates.
+    - `not_mapped_county_unverified`: the point is not in exactly one
+      county shape (none in this release).
+  - The directory summary and the map note count four groups separately:
+    drawn, outside the mapped area, point outside the listed county, and
+    no location. Both say that points are NYSDOH geocodes of each site's
+    mailing address.
+  - The coverage report lists all 48 sites with both counties.
+  - **Why not draw them?** Drawing a conflict site under a county filter
+    puts a mark somewhere the filter says it is not. Filtering it by the
+    point's county would silently relabel the source. Neither value is
+    corrected, and nothing is geocoded.
+  - Statewide, the journey checks that the markers are exactly the 1,517
+    `mapped` sites.
 - **CCN → HFIS candidates.** No official crosswalk was found. The only NYS
   dataset with Medicare numbers covers nursing homes.
   - One documented rule generates candidates: exact equality of the
@@ -192,6 +221,11 @@ Retrieval stops, and keeps nothing, if any check fails. Files are staged in a
       acute-care hospitals. Examples: an address
       with a mail code, an intersection, a PO box.
   - No CCN is ever called a match. No rating is copied to a site.
+  - An extension site that shares a CCN's address is evidence only. It is
+    marked `role: same_address_extension_site`, and the page shows "same
+    address only; not a candidate". Only an HFIS hospital can be a
+    candidate. (15716 shares its address with CCN 330395, whose candidate
+    is HFIS 1635.)
 - **CMS ratings.**
   - Shown only on the CMS entity, as published: 136 rated, 56 not available.
   - "Not available" always carries the CMS footnote text: 36 footnote 19,
@@ -225,12 +259,66 @@ python -m census_explorer.cli site build --base /census-explorer/ \
   `app.js`, `app.css`, `static.js`, `index.html`, `data/manifest.json` and
   `data/digests.json`.
 
+## Release candidate (not published)
+
+This candidate is built at code `3b8d965` against the pinned census release
+that produced the published snapshot. Nothing was pushed to `gh-pages`.
+
+| | |
+| --- | --- |
+| Census input | `data/release-acs5_2023/` in the implementer's environment. This is the processed 2019-2023 ACS release built at `efc9ea1` from `observations-summary-file-acs5_2023-20260924T033904+0000` (with the metadata, geography, roster and reconciliation manifests listed in its `dataset.json`). `dataset.json` SHA-256 is `7eae2f74…`. All 53 input files are listed in `docs/acs5_2023-release-ddac376b-inputs.sha256`. |
+| Hospital input | Retrieval `hospitals-20260925T212532+0000`, rules v1 `ddad50c2…`, registry built at `3b8d965`. `index.json`: `registry.json` `c09c8373…`, `certification.json` `7fc3fd5b…`, schema 2, live. |
+| Command | `python -m census_explorer.cli site build --base /census-explorer/ --data-dir data/release-acs5_2023 --hospitals data/processed/hospitals --out artifacts/hospital-candidate-3b8d965/census-explorer` |
+| Candidate | 116 files. `data/digests.json` `ecb4971b…`. All 114 digests and all 107 in-page digests match. Inventory equals files. `FILES.sha256` `1a38254e…` (copied to `docs/hospital-candidate-3b8d965.sha256`). Tarball `03eb6972…` (3.5 MB). |
+| Snapshot | `ddac376b20c21661b0b92e02bd82435de7851f3d8a5112b50e7b9bb66fb7f60c`, the published one. |
+| Provenance in `data/manifest.json` | `code_revision` `efc9ea1`: the census data build's revision, unchanged, and also in `status.json` and the page footer. `site_code_revision` `3b8d965`: new, the code that wrote the site. `hospitals.code_revision` `3b8d965`. |
+
+**Continuity with the publication.** Compared file by file against
+`origin/gh-pages` `eb96a10`, extracted with `git archive`:
+- **107 of the 113 published files are byte-identical**, including **all 104
+  census data files** (every file under `data/` except `data/manifest.json`
+  and `data/digests.json`).
+- 6 files differ: `app.css`, `app.js`, `static.js`, `index.html`,
+  `data/manifest.json` and `data/digests.json`.
+  - `data/manifest.json` differs only in `generated_at`, `site_code_revision`
+    and the new `hospitals` section.
+  - `index.html` carries the same snapshot. Its in-page digests add the two
+    hospital files.
+- 3 files are new: `hospitals.js`, `data/hospitals/registry.json` and
+  `data/hospitals/certification.json`.
+- The census-only build from the same input and code gives the same result
+  without the two hospital data files.
+- Share links made on the publication therefore open on the candidate.
+
+**What another checkout can and cannot reproduce.**
+- The census release is identified by its retrieval manifests and
+  `dataset.json`. A checkout that built its census data from another
+  retrieval has different `dataset.json` and `status.json` bytes, and so a
+  different snapshot. The reviewer's checkout, for example, gives
+  `bb4b31d6…`.
+- Its estimates can still be identical: the publication before this one
+  matched 103 of 113 files across the two retrievals.
+- To check census continuity without the implementer's processed release,
+  compare the census data entries of `docs/hospital-candidate-3b8d965.sha256`
+  against the published files. Each `census-explorer/data/…` line, other
+  than `manifest.json`, `digests.json` and `data/hospitals/`, should equal
+  the SHA-256 of the same path on `gh-pages` `eb96a10`.
+- Reproducing the candidate byte for byte needs `data/release-acs5_2023/`.
+  Its 53 file hashes are in `docs/acs5_2023-release-ddac376b-inputs.sha256`,
+  but the files are git-ignored. They can be handed over through a channel
+  the reviewer authorizes.
+
 ## Evidence
 
 **Offline, on synthetic fixtures.** No row in these tests describes a real
-hospital. These are the implementer's runs at `808f847`.
-- `python -B -m unittest tests.test_hospitals`: 43 tests, OK. The repairs
-  added:
+hospital. These are the implementer's runs at `3b8d965`.
+- `python -B -m unittest tests.test_hospitals`: 45 tests, OK.
+  - This round added the reviewed pattern: a fixture site listed in Albany,
+    with its published point in another county, sharing a CMS entity's
+    address. The tests check that the source county and coordinates are
+    kept, the map status and reason, the coverage list, the per-site map
+    statuses, and that the extension site is evidence, not a candidate.
+  - The previous round added:
   - a conflicting address, in either row order, with both values in the
     error;
   - conflicting coordinates, county code, county name, main site and name;
@@ -265,36 +353,70 @@ hospital. These are the implementer's runs at `808f847`.
   - the local route;
   - the static build: snapshot stability and byte-identical census files;
   - mismatched registry files.
-- `node --test tests/js/hospitals.test.js`: 11 tests, adding the bed-record
-  JSON cell, the pairing check and the synthetic-data warning. They cover:
+- `node --test tests/js/hospitals.test.js`: 13 tests.
+  - New this round: a conflict site is never drawn under any map scope, the
+    four plan counts always add up to the filtered list, and the table label,
+    the summary sentence, and the CSV columns and coordinates are checked.
+    An extension site's CCN is labelled "same address only".
+  - Earlier: the bed-record JSON cell, the pairing check, the synthetic-data
+    warning, and:
   - filters, and map/table/CSV parity;
   - CSV formula guarding;
   - unavailable ratings;
   - links limited to official https hosts;
   - escaping.
-- Full suite: `python -B -m unittest discover -s tests -t .`, 521 tests, OK,
+- Full suite: `python -B -m unittest discover -s tests -t .`, 523 tests, OK,
   3 skipped.
-- **Independent reviewer, Windows, at `2fd0d2c`** (before these repairs): 508
-  tests, OK, 6 skipped. This is offline and fixture evidence only; the
-  reviewer did not repeat the live runs.
+
+**Independent reviewer.** As reported by the reviewer, and separate from the
+implementer's runs:
+- **At `426e217`, Windows:**
+  - full suite 521 tests, OK, 6 skipped; hospital JS 11/11;
+  - a fresh keyless live retrieval `hospitals-20260926T011722+0000` and an
+    offline registry build: all 11 reconciliation checks pass, 1,579 sites,
+    192 NY CMS entities, 0 conflicts;
+  - a local static build with 114/114 digested files matching;
+  - census-only and hospital builds with identical census data bytes and
+    the same snapshot, `bb4b31d6…`. This is not the published `ddac376b…`,
+    because that checkout's census release comes from another retrieval.
+  - The reviewer found the 15716 defect: listed in Albany, point in Queens,
+    shown as "Mapped". The fix in this round has not yet been independently
+    verified.
+- **At `2fd0d2c`, Windows:** 508 tests, OK, 6 skipped.
 
 **Live, on the real retrieval** `hospitals-20260925T212532+0000`, registry
-built at `808f847`, headless Chromium. These are the implementer's runs. The
-command is `node tests/acceptance/journeys.mjs --local http://127.0.0.1:8765/
---static http://127.0.0.1:8899/census-explorer/`. All journeys passed: 213
-checks, 0 failed, in both local and static modes. The static build keeps
-snapshot `ddac376b…`. The hospital journeys covered:
+built at `3b8d965`, headless Chromium. These are the implementer's runs. The
+static target is **the release candidate itself**, served under
+`/census-explorer/`. The command is `node tests/acceptance/journeys.mjs
+--local http://127.0.0.1:8765/ --static http://127.0.0.1:8899/census-explorer/`.
+All journeys passed: **221 checks, 0 failed**, local and static. The report
+is kept with the candidate. New this round:
+- In a county filter chosen to contain both an unlocated site and a conflict
+  site (Oneida: 44 sites, 1 unlocated, 1 conflict), the map draws exactly
+  the 42 sites whose point lies in Oneida. The summary states all four
+  counts and the geocode wording.
+- Statewide, the 1,517 markers are exactly the `mapped` sites.
+- HFIS 15716 checks:
+  - the table reads "Not mapped: published point is in Queens County, not
+    the listed Albany";
+  - the details give the published point and the reason;
+  - the CSV row has `map_status` `not_mapped_county_conflict`, Albany
+    36001, point county 36081 and the coordinates as published;
+  - it is never drawn;
+  - its CMS cell reads "330395 same address only; not a candidate";
+  - the coverage report lists all 48 such sites.
+
+Earlier checks, still passing:
 - the registry is live data, with rules v1, and shows no synthetic-data
   banner;
-- each CSV row's bed-record JSON equals the registry's records for that site
-  (20 records over the 9 Rockland sites), and no column is a total;
+- each CSV row's bed-record JSON equals the registry's records for that
+  site, and no column is a total;
 - the layer is off by default, and nothing hospital-related is requested
   before it is turned on;
 - the registry loads with every reconciliation check passed;
-- a county filter (Rockland, 9 sites, 1 unlocated) draws exactly its 8
-  located sites, and the summary and table agree;
-- the CSV holds exactly the 9 filtered records;
-- an unlocated site shows its reason and has no marker;
+- the CSV holds exactly the filtered records;
+- an unlocated site shows "Not mapped: …" in the table, its reason in the
+  details, and has no marker;
 - an extension site links to its main site, and back;
 - no rating appears on an HFIS site;
 - a marker click opens a site without changing the census selection;
@@ -342,5 +464,9 @@ repository harness.
   and federal hospitals, beyond their CMS rows. Also not covered: SPARCS,
   cost reports, historical snapshots, other states, staffed or available
   beds, travel time and service areas.
+- **Footer revision.** The page footer and `status.json` give the census
+  data build's revision (`efc9ea1`), not the page code's. Changing that
+  would change the snapshot. The page code's revision is
+  `data/manifest.json` `site_code_revision`.
 - **Browsers:** Chromium only. There was no screen-reader pass and no
   physical device.
