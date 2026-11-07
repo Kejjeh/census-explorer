@@ -1,0 +1,100 @@
+{
+ "variables": {
+  "B06009_001E": {
+   "label": "Estimate!!Total:",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "int",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_001M": {
+   "label": "Margin of Error!!Total:",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "int",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_001EA": {
+   "label": "Annotation of Estimate!!Total:",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "string",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_001MA": {
+   "label": "Annotation of Margin of Error!!Total:",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "string",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_005E": {
+   "label": "Estimate!!Total:!!Bachelor's degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "int",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_005M": {
+   "label": "Margin of Error!!Total:!!Bachelor's degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "int",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_005EA": {
+   "label": "Annotation of Estimate!!Total:!!Bachelor's degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "string",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_005MA": {
+   "label": "Annotation of Margin of Error!!Total:!!Bachelor's degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "string",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_006E": {
+   "label": "Estimate!!Total:!!Graduate or professional degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "int",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_006M": {
+   "label": "Margin of Error!!Total:!!Graduate or professional degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "int",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_006EA": {
+   "label": "Annotation of Estimate!!Total:!!Graduate or professional degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "string",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  },
+  "B06009_006MA": {
+   "label": "Annotation of Margin of Error!!Total:!!Graduate or professional degree",
+   "concept": "Place of Birth by Educational Attainment in the United States",
+   "predicateType": "string",
+   "group": "B06009",
+   "limit": 0,
+   "universe": "Population 25 years and over in the United States"
+  }
+ }
+}

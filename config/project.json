@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "census-explorer",
-  "status": "planning",
+  "status": "stage-a-c-implemented",
   "execution_mode": "local",
   "first_project": {
     "id": "nyc-population-change",
@@ -15,15 +15,116 @@
     },
     "initial_product": "acs/acs5",
     "initial_release_year": 2023,
-    "initial_period": {"start": 2019, "end": 2023},
-    "candidate_tables": ["B05006", "B06009", "B06004B"],
-    "historical_target_years": [1850, 1860, 1870, 1880, 1900, 1910, 1920, 1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000],
+    "initial_period": {
+      "start": 2019,
+      "end": 2023
+    },
+    "candidate_tables": [
+      "B05006",
+      "B06009",
+      "B06004B"
+    ],
+    "historical_target_years": [
+      1850,
+      1860,
+      1870,
+      1880,
+      1900,
+      1910,
+      1920,
+      1930,
+      1940,
+      1950,
+      1960,
+      1970,
+      1980,
+      1990,
+      2000
+    ],
     "historical_sample_ids": null,
     "historical_boundary_definition": "unresolved: document five-borough footprint reconstruction by year",
     "birthplace_group_codes": null,
     "modern_chart_label": "2019-2023 ACS",
     "acs_one_year_2020_policy": "exclude standard series; experimental product requires separate treatment",
     "historical_variance_method": null,
-    "allow_unverified_group_codes": false
+    "allow_unverified_group_codes": false,
+    "candidate_tables_resolved": [
+      "B01003",
+      "B05002",
+      "B05006",
+      "B06004B",
+      "B06009"
+    ],
+    "denominator_verification": "B05002 supplies the total-population and foreign-born denominators. B05006 has a narrower universe (foreign-born excluding population born at sea), so B05006 shares use B05006_001 as their denominator and the B05002/B05006 difference is reported as a diagnostic, not silently reconciled."
+  },
+  "explorer": {
+    "default_release": "acs5_2023",
+    "comparison_release": "acs5_2022",
+    "geography_levels": [
+      "county",
+      "tract"
+    ],
+    "study_area": {
+      "id": "nys",
+      "label": "New York State",
+      "coverage": "state",
+      "state_fips": "36",
+      "cache_suffix": "state36",
+      "note": "The dataset covers every county and census tract in New York State, plus the published state row, which is used for reconciliation and as a state reference. New York City is not the study area: it is the documented five-county subset in composites.nyc, and first_project.modern_counties carries the borough names used for those five counties only. The county roster is not listed here; it is read from the official cartographic boundary file for the release's boundary vintage and checked against the published county rows."
+    },
+    "releases": {
+      "acs5_2023": {
+        "provider": "US Census Bureau",
+        "dataset": "acs/acs5",
+        "vintage": 2023,
+        "period_start": 2019,
+        "period_end": 2023,
+        "period_label": "2019-2023 ACS",
+        "product_label": "American Community Survey 5-year estimates",
+        "boundary_release": "GENZ2023",
+        "geography_vintage": "2023 cartographic boundary files (1:500,000)",
+        "api_base": "https://api.census.gov/data/2023/acs/acs5",
+        "summary_file_base": "https://www2.census.gov/programs-surveys/acs/summary_file/2023/table-based-SF/data/5YRData",
+        "citation": "U.S. Census Bureau, 2019-2023 American Community Survey 5-Year Estimates, Detailed Tables."
+      },
+      "acs5_2022": {
+        "provider": "US Census Bureau",
+        "dataset": "acs/acs5",
+        "vintage": 2022,
+        "period_start": 2018,
+        "period_end": 2022,
+        "period_label": "2018-2022 ACS",
+        "product_label": "American Community Survey 5-year estimates",
+        "boundary_release": "GENZ2022",
+        "geography_vintage": "2022 cartographic boundary files (1:500,000)",
+        "api_base": "https://api.census.gov/data/2022/acs/acs5",
+        "summary_file_base": "https://www2.census.gov/programs-surveys/acs/summary_file/2022/table-based-SF/data/5YRData",
+        "citation": "U.S. Census Bureau, 2018-2022 American Community Survey 5-Year Estimates, Detailed Tables."
+      }
+    },
+    "boundary_base": "https://www2.census.gov/geo/tiger",
+    "comparison_rules": {
+      "require_same_dataset": true,
+      "require_same_universe": true,
+      "require_same_geography_ids": true,
+      "block_one_year_five_year_splice": true,
+      "overlapping_periods_are_not_independent": true,
+      "shared_cut_points": true
+    },
+    "composites": {
+      "nyc": {
+        "label": "New York City (all five boroughs)",
+        "level": "county",
+        "member_geoids": [
+          "36005",
+          "36047",
+          "36061",
+          "36081",
+          "36085"
+        ],
+        "definition": "New York City consists of exactly these five counties, which are coextensive with its five boroughs. A reference built from fewer than all five is not New York City and must not carry its name.",
+        "verification": "Summing these five county rows reproduces the separately published New York City place row (GEOID 3651000) exactly for every cell the reconcile command checks. See docs/RUNBOOK.md step 2."
+      }
+    }
   }
 }

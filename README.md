@@ -1,42 +1,374 @@
 # Census Explorer
 
-A local research lab for building a personal census explorer: maps, time series, population comparisons, and reproducible exports. NYC migration and demographic change is the first project; the repository should support additional census projects later.
+**Turn a question about a place into a defensible brief someone can
+understand, check and reuse.**
 
-## Current status
+A local, offline-first tool for official census data. Pick one of three
+starting questions, pick the place, pick what to show, and get a print-ready
+brief with the definitions, the denominators, the margins of error and the
+sources attached — plus the CSV and the provenance bundle behind it. The
+2019-2023 ACS build covers every county and census tract in New York State;
+New York City is its documented five-borough subset and the default view.
+The data engine is independent of either.
 
-Repository foundation only. No data have been downloaded, no extracts submitted, no analysis computed, and no dashboard implemented. The pipeline filenames and completion claims in the supplied project notes describe a proposed system; those files were not provided. Digitized chart values are not source data.
+Who it is aimed at, and whether anyone would pay for it, are **hypotheses**.
+See [docs/PRODUCT_DIRECTION.md](docs/PRODUCT_DIRECTION.md).
 
-## Start here
+Everything runs on your own machine. There is no account, no hosted service and
+no telemetry, and the local service holds no credentials.
 
-- [Social Explorer research](docs/SOCIAL_EXPLORER_RESEARCH.md): feature comparison, proposed architecture, and build milestones.
-- [Research plan](docs/RESEARCH_PLAN.md): eight research directions, definitions, validation gates, and staged delivery.
-- [Sources and claim review](docs/SOURCES.md): official documentation and unresolved claims.
-- [Project configuration](config/project.json): initial scope and explicit unresolved decisions; a planning configuration, not an executable extract.
-- [Agent instructions](AGENTS.md): rules for future work.
+## What works today
 
-## First implementation milestone
+| Capability | State |
+| --- | --- |
+| Topic sidebar over every measure the build carries, grouped by published concept | Working; 47 measures at county and tract level |
+| Scope: New York City, New York State, or one county's census tracts | Working; the same scope drives the map, table, search listing, CSV, brief and share link. A view with no scope (every older link and saved view) is New York City |
+| Every place reachable | Working; the table pages through every row (5,411 tracts statewide), search looks across the whole build and labels places outside the view |
+| Two-place comparison chart | Working; one axis from zero, published 90% intervals, missing and controlled uncertainty drawn distinctly, no significance claim |
+| Plain-language selection summary: what is counted, out of what | Working |
+| Compatible benchmark built by adding underlying counts | Working; a named composite is refused unless its whole documented membership is present |
+| Quality as three separate statements, no combined score | Working |
+| Print-ready brief from the same validated selection | Working |
+| ACS retrieval for every New York State county and census tract | Working for 2019-2023 ACS five-year. The 2018-2022 release is still its earlier New York City-only build |
+| Coverage proved against the release's own geography roster | Working; 1 state, 62 counties and 5,411 tracts listed; 15 listed tracts have no table row and are shown as unavailable with that reason |
+| Exact cells, labels and universes resolved from official release metadata | Working; no code is written from memory |
+| Immutable raw cache, checksums, retrieval timestamps, manifests | Working; `verify manifests` re-hashes every artifact |
+| Reconciliation against an independently published official row | Working; the five boroughs match the published New York City row (6/6 cells, both releases) and the 62 counties add up exactly to the published state row (6/6 cells, 2019-2023) |
+| Matching-vintage Census polygons, string GEOIDs, join accounting | Working; 62 counties and 5,395 tracts matched; 16 tracts (all water, population 0) have estimates but no polygon and are listed by GEOID; every tract's county checked against the boundary file's own STATEFP/COUNTYFP |
+| Local browser app: map workspace, topic sidebar, place search, inspect and compare panel, sortable table | Working |
+| Saved projects, CSV + provenance export, SVG figure export | Working |
+| Comparing two places within one period | Working; needs no boundary equivalence, and no significance is claimed |
+| Comparing two reference periods | **Blocked at every level.** Equivalence across boundary vintages needs documented provider correspondence or a scoped review, and this repository ships neither |
+| Saved projects that reproduce exactly or refuse to open | Working; content-pinned and fail-closed |
+| Offline test suite | Working: 478 Python tests (Linux) plus 42 Node tests of the page logic, no network; cached files read identically with LF or CRLF line endings |
+| Fixture mode for machines with no data and no credentials | Working, conspicuously labelled |
+| Static build for GitHub Pages | Working; the explore journey runs with no Python behind it, with shareable views and printable briefs; saved projects and export bundles still require the local app. See `docs/DEPLOY.md` |
+| Historical microdata, generations, migration flows, full platform parity | **Not started.** See `docs/RESEARCH_PLAN.md` |
 
-Build one reproducible ACS county-table pull for the five NYC boroughs, preserving original responses, table metadata, estimates, margins of error, annotations, and a manifest. Reconcile a small set of cells to the published source before adding calculations or maps. Start with the 2019-2023 ACS five-year product because it matches the supplied brief; this is an explicit reference period, not a claim that it is the latest release.
+Stages A, B and C of `docs/SOCIAL_EXPLORER_RESEARCH.md` are implemented. Stages
+D and E (historical evidence and specialised research) are not, and nothing in
+this repository should be read as a finding about NYC's demographic history.
 
-Then build a local table browser and the first shared-scale small-multiple chart. Historical microdata, harmonized maps, migration flows, and a full explorer are later milestones. No application framework or third-party dependency has been selected.
+## Requirements
 
-## Credentials and local data
+Python 3.11 or newer. **No third-party packages.** The project deliberately uses
+only the standard library, and the browser interface is plain HTML, CSS and
+JavaScript with no CDN, so it works with no network at all. See
+`docs/DEPENDENCIES.md` for the DuckDB / Parquet / MapLibre decision that is
+still open.
 
-Request your own Census key at https://api.census.gov/data/key_signup.html. IPUMS access requires an account and the applicable project permissions; its API key page is https://account.ipums.org/api_keys.
+## Quick start
 
-Keep keys in local environment variables named `CENSUS_API_KEY` and `IPUMS_API_KEY`. `.env.example` documents these names; no dotenv loader is installed. Never paste keys into chat or commit them. Future clients must redact keys from URLs, logs, manifests, and errors.
+No credential is needed for the default path: the Census Bureau publishes the
+same ACS estimates in its table-based Summary File, which is open.
 
-Use ignored `data/raw/`, `data/processed/`, and `artifacts/` folders for downloads and generated results. Preserve raw inputs immutably with checksums. Commit small synthetic fixtures and metadata separately when implementation begins. Respect source-specific access and redistribution terms.
-
-## Verify the foundation
-
-Run from this repository in PowerShell:
+### Windows PowerShell
 
 ```powershell
-python -m json.tool config/project.json
- git diff --cached --check
- git status --short --branch
- git check-ignore .env data/raw/example.csv.gz artifacts/example.html
+cd census-explorer
+python -m census_explorer.cli fetch all --release acs5_2023
+python -m census_explorer.cli reconcile --fetch --release acs5_2023
+python -m census_explorer.cli build --release acs5_2023
+python -m census_explorer.cli serve
 ```
 
-These verify configuration and repository hygiene only. There is no runtime or analysis test suite yet.
+Then open <http://127.0.0.1:8765/>.
+
+To add the comparison period:
+
+```powershell
+python -m census_explorer.cli fetch all --release acs5_2022
+python -m census_explorer.cli reconcile --fetch --release acs5_2022
+python -m census_explorer.cli build --release acs5_2022
+```
+
+### macOS / Linux
+
+The same commands run unchanged:
+
+```bash
+python3 -m census_explorer.cli fetch all --release acs5_2023
+python3 -m census_explorer.cli reconcile --fetch --release acs5_2023
+python3 -m census_explorer.cli build --release acs5_2023
+python3 -m census_explorer.cli serve
+```
+
+`fetch all` streams the five table files (about 435 MB for 2019-2023) and the
+release's geography roster (about 92 MB) from the Census Bureau and keeps only
+New York State's rows (5,459 per table; 5,474 roster rows), recording the digest
+of each complete upstream file so the download can be re-verified. The
+statewide cache is written beside, never over, an earlier New York City-only
+one. Then `reconcile --state` checks that the counties add up to the state:
+
+```bash
+python3 -m census_explorer.cli reconcile --state --release acs5_2023
+```
+
+### No data yet? Run fixture mode
+
+```powershell
+python -m census_explorer.cli fixtures build
+python -m census_explorer.cli serve --data-dir data/fixture-processed
+```
+
+Fixture mode starts the whole application with synthetic values and synthetic
+rectangles instead of boundaries. Every screen, figure and export is banner-
+marked `FIXTURE MODE`. **Nothing produced in fixture mode is a census finding.**
+
+## Credentials
+
+The default Summary File transport needs no key. The Census Data API does, and
+it is supported as an alternative transport:
+
+```powershell
+# Request your own key at https://api.census.gov/data/key_signup.html
+$env:CENSUS_API_KEY = "<your key>"           # current session only
+python -m census_explorer.cli fetch observations --release acs5_2023 --transport api
+python -m census_explorer.cli build --release acs5_2023 --transport api
+```
+
+```bash
+export CENSUS_API_KEY="<your key>"
+python3 -m census_explorer.cli fetch observations --release acs5_2023 --transport api
+```
+
+Rules the code enforces:
+
+- The key is read from the environment at the moment of the call and is never
+  written to a cache file, manifest, export, log line or error message. The
+  recorded URL has the `key` parameter removed entirely.
+- The key never reaches the browser, because the local service never reads one.
+- `.env` is git-ignored; `.env.example` documents the variable names only.
+- Never paste a key into a chat window, an issue, or a commit.
+
+## Publishing a static copy
+
+```powershell
+python -m census_explorer.cli site build --base /census-explorer/ --out site
+```
+
+Runs this repository's Python once and writes `site/` — the interface plus
+everything it computed, as files a browser reads over relative URLs, with no
+service behind them. The explore journey, shareable links and printable briefs
+work there. Links check the published data snapshot; briefs list up to 25 selected
+places and CSV includes the full scope. Export bundles and saved projects
+still need the local service. See
+[docs/DEPLOY.md](docs/DEPLOY.md).
+
+## Commands
+
+| Command | Network | What it does |
+| --- | --- | --- |
+| `fetch metadata` | yes | Official table metadata (no key required) |
+| `fetch geography` | yes | Cartographic boundary files of the matching vintage |
+| `fetch observations` | yes | ACS estimates and margins of error |
+| `fetch roster` | yes | The release's own list of the state, county and tract geographies it publishes |
+| `fetch all` | yes | All of the above, in order |
+| `reference refresh` | yes | Re-archive the official annotation-value documentation |
+| `reconcile --fetch` | yes | Retrieve the published New York City row and compare it with the borough sum |
+| `smoke` | yes | A deliberately small live request, run on its own |
+| `build` | no | Assemble the analysis dataset from the cache |
+| `verify manifests` | no | Re-hash every cached artifact against its manifest |
+| `verify catalog` | no | Check every measure against the published release |
+| `catalog list \| show` | no | Search the catalog; show a measure's exact cells |
+| `compare --a --b --measure` | no | Report whether two releases may be compared, and why not |
+| `reconcile` | no | Re-run the comparison from the cache |
+| `reconcile --state` | no | Add every county's published row and compare with the published state row |
+| `export` | no | Write a CSV + provenance + figure bundle to `artifacts/` |
+| `project list \| show \| verify \| delete` | no | Saved project definitions and their pinned inputs |
+| `fixtures build` | no | Build the synthetic fixture dataset |
+| `serve` | no | Run the local browser application on loopback |
+
+Retrieval is always an explicit command. Importing the package, running the
+tests, building the dataset, serving the app and rendering a figure never touch
+the network; the service switches network access off for its own process at
+start-up.
+
+## Verify the build
+
+```powershell
+python -m unittest discover -s tests -t .          # 478 offline tests on Linux
+python -m census_explorer.cli verify manifests     # re-hash the raw cache
+python -m census_explorer.cli verify catalog       # cells vs the published release
+python -m census_explorer.cli reconcile --release acs5_2023
+python -m census_explorer.cli compare --a acs5_2023 --b acs5_2022 --level county --measure foreign_born_share
+python -m census_explorer.cli project verify --id <project-id>
+```
+
+The live smoke test is opt-in and separate:
+
+```powershell
+$env:CENSUS_EXPLORER_LIVE = "1"
+python -m unittest tests.test_live_smoke
+python -m census_explorer.cli smoke --transport summary-file
+```
+
+The keyed API smoke test additionally needs `CENSUS_API_KEY` and skips without
+one rather than failing.
+
+## What the interface insists on
+
+- **Period labels are never shortened.** A 2019-2023 ACS five-year estimate is
+  labelled `2019-2023 ACS` everywhere, including exports and figures.
+  Configuration that labels a five-year period with a single year is rejected
+  at load time.
+- **A denominator is part of a measure.** Every share names its numerator
+  cells, denominator cells and published universe, in the interface and in
+  every exported row.
+- **Unavailable is not zero.** Census annotation codes such as `-999999999`
+  are classified as meanings, never parsed as numbers, and are shown as
+  "no data" with the published reason. They sort to the end of the table.
+- **Missing uncertainty is unavailable.** The one exception is the documented
+  `-555555555` annotation, which states that a controlled estimate has no
+  sampling error; it is applied as published and always flagged in the drawer
+  and the export. That claim is recorded when the value is computed, never
+  inferred later: a controlled denominator does not make a share controlled,
+  and a margin of error that could not be computed stays unknown.
+- **Birthplace is a stock, not a flow.** No measure describes a place of birth
+  as a recent arrival, and "born in state of residence" is labelled as New York
+  *State*, never New York *City*.
+- **Comparisons are refused by default.** A comparison is drawn only when every
+  applicable check has actually run and passed. Different survey products or
+  period lengths are blocked. A comparison across boundary vintages is blocked
+  until equivalence is established by the same vintage, documented provider
+  correspondence, or a scoped review — a shared GEOID is not evidence, and
+  neither is a computed resemblance between two polygons. A published cell
+  label that changed in a way nobody has reviewed is blocked, not disclosed and
+  drawn anyway. A check that could not be performed — no measure named,
+  metadata not cached — blocks rather than being skipped.
+- **A question offers nothing the data cannot support.** No income, poverty,
+  housing or rent: those tables are not in this build, so no question mentions
+  them. No neighbourhood names: there are no documented neighbourhood
+  boundaries here, so a census tract is called a census tract.
+- **Quality is three statements, not a score.** Uncertainty, comparison
+  eligibility and reference period are different problems. There is no combined
+  trust number, no "significant change" claim, and no causal language.
+- **A saved project reproduces exactly, or refuses to open.** It pins the
+  content digests of the files it was built from — the measure values, the
+  geometry, the dataset's measure definitions and the retrieval manifests — and
+  replays from its own pinned definitions rather than the current catalog. If
+  any pinned input is missing or changed, replay and export stop with a message
+  naming the file. Nothing is re-fetched and nothing is substituted.
+- **One selection drives every output.** The table, both map panels, the chart,
+  the CSV and the provenance document are built from a single validated
+  selection, so an exported figure cannot cover areas the exported data does
+  not.
+- **Joins are accounted for.** GEOIDs are strings, duplicates are refused, and
+  unmatched features and observations are reported by identifier and by
+  population.
+- **Research codes stay in a details panel**, not in the primary navigation,
+  and travel with every export.
+- **The sidebar offers what the build carries, and nothing else.** A measure is
+  listed at a geography level only when the build recorded it as available
+  there, and a measure the sidebar lists always resolves to a question the
+  brief can render — a test asserts both, in both directions.
+- **A difference is a difference, not a finding.** Two places can be compared
+  inside one reference period, and the panel states the arithmetic difference
+  next to both margins of error. It does not test significance and says so.
+- **A search that finds nothing says what this build can find.** There is no
+  address search and no neighbourhood geography here, and a city such as
+  Buffalo is not a geography in this build; the empty result says that
+  rather than leaving a blank box. A search that finds more than it lists
+  says how many it found.
+- **Counties are boroughs only in New York City.** Outside the five boroughs
+  a county keeps its official name, "Erie County", and is never named after
+  a city in it. The New York City reference is always exactly its five
+  counties, whatever else is in view; the New York State reference is the
+  state's own published row, never a sum or an average of county figures.
+- **Scope and inspection are different things.** The scope is what the map,
+  table, CSV, brief and link cover. A place found by search or kept in the
+  comparison may lie outside it; it is then labelled as outside the view,
+  and nothing silently widens the scope to include it.
+- **Only the newest load may change what is on screen.** Controls are faster
+  than the service, so several loads can be in flight at once. An older
+  response, success or failure, is dropped rather than committed, and saving
+  and exporting stay unavailable until one complete load has landed — neither
+  may describe a view assembled from two of them.
+- **The legend describes the map in front of you.** The number of shaded
+  classes comes from the values in view: one borough, or a set of areas that
+  share a value, is one class and says so. Every break is a value that occurs
+  in the data, and every class is one at least one area falls in.
+- **Coverage is stated for the selection, not the build.** How many areas in
+  view could not be drawn is separate from how many the whole build cannot
+  draw, and a view that drew everything does not inherit the second number.
+- **A starting example is a starting point, not a finding.** Each of the
+  three cards borrows the catalog's own wording for what its measure counts
+  and what it is out of, names the places and period it opens, and says what
+  the view does not say. A card whose measure or place this build does not
+  carry is dropped rather than adjusted to something else.
+- **A published copy computes nothing.** The static build runs this
+  repository's Python once and writes what it produced; the page reshapes and
+  counts, and a round-trip test compares its uncertainty panels and its CSV
+  against the service's own output, case by case. What it cannot do — the
+  export bundle, saved views and their raw-input pin check —
+  is disabled on the page with the reason, never approximated.
+- **An export is delivered, not announced.** The panel links the brief, the
+  data, the figure and the provenance record; the route that serves them is
+  read-only, confined to `artifacts/`, and limited to the file types an
+  export writes.
+
+## Layout
+
+```
+census_explorer/     ingestion, validation, measures, service (standard library only)
+  retrieve/          provider-specific retrieval; the only modules that fetch
+  reference/         annotation semantics extracted from official documentation
+web/                 the browser interface: plain HTML, CSS and JavaScript
+config/              project scope, releases, and the measure catalog
+fixtures/            small synthetic inputs used by the offline tests
+tests/               the offline test suite
+data/                git-ignored: raw cache, manifests, processed datasets, projects
+artifacts/           git-ignored: export bundles
+```
+
+## Documentation
+
+- [Runbook](docs/RUNBOOK.md): fresh checkout to a finished brief, with the
+  expected output and timings at each step.
+- [Product direction](docs/PRODUCT_DIRECTION.md): the promise, what is
+  hypothesis, and the roadmap as candidates rather than commitments.
+- [Usage and verification](docs/USAGE.md): every command, with expected output.
+- [Publishing](docs/DEPLOY.md): the static build, exactly what it contains,
+  what a published copy cannot do, and the steps to put it on GitHub Pages.
+- [Release checklist](docs/RELEASE_CHECKLIST.md): what has to be true before
+  publishing, what is true now, and what is still open.
+- [Data handling decisions](docs/DATA_HANDLING.md): universes, denominators,
+  annotations, margins of error, geography and comparison rules.
+- [Dependencies](docs/DEPENDENCIES.md): what is used, and the open decision.
+- [Social Explorer research](docs/SOCIAL_EXPLORER_RESEARCH.md): the feature
+  comparison and staged plan this implementation follows.
+- [Research plan](docs/RESEARCH_PLAN.md): the eight research directions and
+  their evidence gates. **None of them is complete.**
+- [Sources](docs/SOURCES.md): official documentation, and claims still unverified.
+- [Agent instructions](AGENTS.md): the review rules for changes here.
+
+## Limitations, stated plainly
+
+- Only New York State, and only the two ACS five-year releases listed in
+  `config/project.json`, have been retrieved and validated. Statewide coverage
+  is for 2019-2023 only; the 2018-2022 release remains the earlier New York
+  City build, so a state or upstate view cannot be set against it, and
+  rebuilding it now would first retrieve it statewide (`fetch all --release
+  acs5_2022`).
+- **Comparing two reference periods is blocked at every level.** Equivalence
+  across boundary vintages requires documented provider correspondence or a
+  scoped review, and this repository ships neither. Measuring the published
+  footprints (`cli geography footprint`) shows why the question is real: 73 of
+  2,324 shared tracts and 3 of 5 counties differ beyond the measurement
+  tolerance between GENZ2022 and GENZ2023. That measurement informs a review;
+  it cannot replace one. Comparing **places within one period** is unaffected.
+- **A saved brief detects tampering; it is not an archive.** It pins the digest
+  of every input and refuses to reopen if one changed. It does not keep a copy
+  of the data and cannot restore an earlier version. Durable versioned briefs
+  are on the roadmap, not in this build.
+- The measure catalog is 47 measures across five tables. It is not a
+  500,000-variable library and does not attempt platform parity.
+- The map uses local boundary layers and a simple equirectangular projection,
+  adequate for one state at this scale. There is no basemap, no tile pipeline and no
+  ring/drive-time analysis.
+- No historical microdata, no IPUMS or NHGIS extract, no generation analysis, no
+  migration flows and no pre-2018 series exist in this repository. The eight
+  research directions in `docs/RESEARCH_PLAN.md` remain open, and their
+  evidence gates have not been met.
+- This is a personal research tool, not a production system. It has had no
+  security review, no load testing and no multi-user design.

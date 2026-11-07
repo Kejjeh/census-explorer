@@ -1,0 +1,37 @@
+{
+  "provenance": {
+    "document_bytes": 291789,
+    "document_sha256": "c02a9a73c77ed4b97b044c5dcd500978b32bbb5eb44ca379f769d4fe1ba365fc",
+    "extractor": "census_explorer.retrieve.reference.parse_annotation_values",
+    "note": "Values are transcribed from the official Census developer documentation; they are meanings, never measurements.",
+    "retrieved_at": "2026-09-20T08:17:37+00:00",
+    "source_url": "https://www.census.gov/data/developers/data-sets/acs-1year/notes-on-acs-estimate-and-annotation-values.html"
+  },
+  "schema_version": 1,
+  "values": {
+    "-222222222": {
+      "meaning": "The margin of error could not be computed because there were an insufficient number of sample observations.",
+      "symbol": "**"
+    },
+    "-333333333": {
+      "meaning": "The margin of error could not be computed because the median falls in the lowest interval or highest interval of an open-ended distribution.",
+      "symbol": "***"
+    },
+    "-555555555": {
+      "meaning": "A margin of error is not appropriate because the corresponding estimate is controlled to an independent population or housing estimate. Effectively, the corresponding estimate has no sampling error and the margin of error may be treated as zero.",
+      "symbol": "*****"
+    },
+    "-666666666": {
+      "meaning": "The estimate could not be computed because there were an insufficient number of sample observations. For a ratio of medians estimate, one or both of the median estimates falls in the lowest interval or highest interval of an open-ended distribution. The estimate could not be computed because there were an insufficient number of sample observations. For a ratio of medians estimate, one or both of the median estimates falls in the lowest interval or highest interval of an open-ended distribution. For a 5-year median estimate, the margin of error associated with a median was larger than the median itself.",
+      "symbol": "-"
+    },
+    "-888888888": {
+      "meaning": "The estimate or margin of error is not applicable or not available.",
+      "symbol": "(X)"
+    },
+    "-999999999": {
+      "meaning": "The estimate or margin of error cannot be displayed because there were an insufficient number of sample cases in the selected geographic area.",
+      "symbol": "N"
+    }
+  }
+}

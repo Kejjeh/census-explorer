@@ -1,0 +1,92 @@
+# Publish the static Census Explorer to GitHub Pages.
+#
+# This workflow is deliberately manual. It performs an explicit retrieval from
+# the Census Bureau, so running it produces a NEW retrieval with its own
+# manifest — it is not the build that was reviewed locally. The reviewed path
+# is the local one:
+#
+#   python -m census_explorer.cli site build --base /census-explorer/ --out site
+#
+# and publishing that output. See docs/DEPLOY.md.
+#
+# No credential is used or needed: the Summary File transport is keyless.
+
+name: Publish static site to Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_retrieval:
+        description: >-
+          Type yes to confirm this run may retrieve from the Census Bureau.
+          It produces a new retrieval, not the locally reviewed build.
+        required: true
+        default: "no"
+      release:
+        description: Release id to publish
+        required: false
+        default: acs5_2023
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Retrieve, build and assemble the site
+    runs-on: ubuntu-latest
+    if: inputs.confirm_retrieval == 'yes'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Offline test suite
+        run: python -B -m unittest discover -s tests -t .
+
+      - name: Retrieve from the Census Bureau (explicit, keyless)
+        run: |
+          python -m census_explorer.cli fetch all \
+            --release "${{ inputs.release }}" --transport summary-file
+
+      - name: Build the dataset (offline)
+        run: python -m census_explorer.cli build --release "${{ inputs.release }}"
+
+      - name: Verify manifests
+        run: python -m census_explorer.cli verify manifests
+
+      - name: Build the static site
+        run: |
+          python -m census_explorer.cli site build \
+            --release "${{ inputs.release }}" \
+            --base "/${{ github.event.repository.name }}/" --out site
+
+      - name: Refuse to publish anything but the site directory
+        run: |
+          test -f site/index.html
+          test -f site/data/manifest.json
+          test -f site/.nojekyll
+          ! grep -rq "127.0.0.1\|localhost" site --include='*.html' --include='*.js'
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

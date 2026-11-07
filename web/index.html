@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Census Explorer</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip-link" href="#stage" data-skip="stage">Skip to the map</a>
+<a class="skip-link" href="#data-table" data-skip="table">Skip to the table</a>
+<a class="skip-link" href="#result-actions" data-skip="actions">Skip to result actions: share, brief and export</a>
+<div id="mode-banner" class="mode-banner" hidden></div>
+<div id="static-note" class="static-note" hidden></div>
+<div id="link-note" class="link-note" role="status" hidden></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="brand-name">Census Explorer</span>
+  </div>
+  <p class="release-chip" id="release-chip">
+    <span class="chip-label">Release</span>
+    <span class="chip-value" id="release-value">…</span>
+  </p>
+  <div class="topbar-actions">
+    <button type="button" class="btn" id="btn-method" aria-expanded="false"
+            aria-controls="drawer">Method &amp; sources</button>
+    <div id="result-actions" class="result-actions" role="group" tabindex="-1"
+         aria-label="Result actions: share, brief and export">
+      <button type="button" class="btn" id="btn-save" aria-expanded="false"
+              aria-controls="save-panel">Saved views</button>
+      <button type="button" class="btn" id="btn-share" aria-controls="share-result" aria-expanded="false" hidden>Share view</button>
+      <button type="button" class="btn" id="btn-brief">Open brief</button>
+      <button type="button" class="btn primary" id="btn-export">Export</button>
+    </div>
+  </div>
+  <a class="skip-inline" id="actions-skip-table" href="#data-table" data-skip="table">Back to the table</a>
+</header>
+
+<div id="share-result" class="share-panel" role="region" aria-label="Share this view" hidden><label class="field">Copy this link<input id="share-url" type="text" readonly></label><button class="btn" id="share-copy" type="button">Copy link</button> <button class="btn" id="share-close" type="button">Close sharing</button><p>Reopens the measure, geography, selected scope, inspected place, comparison and reference. It checks the published snapshot; it is not a saved project. Map zoom and table sort are not included.</p></div>
+
+<div id="startup" class="startup" aria-live="polite">
+  <p class="muted">Loading the built dataset…</p>
+</div>
+
+<div id="save-panel" class="save-panel" hidden>
+  <form id="save-form" class="save-form">
+    <label class="field">
+      <span>Save this view as</span>
+      <input type="text" id="project-id" placeholder="bronx-naturalisation"
+             pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
+    </label>
+    <button type="submit" class="btn primary" id="save-submit">Save</button>
+  </form>
+  <p class="hint" id="save-blocked" hidden></p>
+  <p class="hint">Saving pins the exact input files. Reopening checks them and
+    refuses rather than showing different numbers.</p>
+  <ul id="project-list" class="project-list"></ul>
+</div>
+
+<main class="shell" id="shell" hidden>
+
+  <aside class="sidebar" aria-label="Topics and measures">
+    <div class="sidebar-inner">
+      <button type="button" class="btn starters-toggle" id="btn-starters"
+              aria-controls="starters" aria-expanded="false">Start from a question</button>
+
+      <div class="region-switch" id="region-switch" role="radiogroup"
+           aria-label="Area covered" hidden>
+        <button type="button" role="radio" data-region="nyc" aria-checked="true">New York City</button>
+        <button type="button" role="radio" data-region="nys" aria-checked="false">New York State</button>
+      </div>
+      <div class="level-switch" role="radiogroup" aria-label="Geography">
+        <button type="button" role="radio" data-level="county" aria-checked="true">Boroughs</button>
+        <button type="button" role="radio" data-level="tract" aria-checked="false">Census tracts</button>
+      </div>
+      <p class="level-note" id="level-note"></p>
+      <label class="field county-field" id="county-field" hidden>
+        <span id="county-label">Census tracts in</span>
+        <select id="county-select"></select>
+      </label>
+
+      <label class="field search-field">
+        <span class="visually-hidden">Search topics and measures</span>
+        <input type="search" id="measure-search" placeholder="Search topics…"
+               autocomplete="off" aria-describedby="measure-count">
+      </label>
+      <div class="chips" role="group" aria-label="Filter by unit">
+        <button type="button" class="chip" data-unit="all" aria-pressed="true">All</button>
+        <button type="button" class="chip" data-unit="percent" aria-pressed="false">Shares</button>
+        <button type="button" class="chip" data-unit="persons" aria-pressed="false">Counts</button>
+      </div>
+      <p class="muted tiny" id="measure-count"></p>
+
+      <div id="topic-groups" class="topic-groups" role="listbox"
+           aria-label="Measure"></div>
+    </div>
+  </aside>
+
+  <section class="stage" id="stage" tabindex="-1">
+    <div class="stage-head">
+      <div class="stage-title">
+        <h1 id="measure-title" tabindex="-1">—</h1>
+        <p class="denominator" id="denominator-line"></p>
+      </div>
+      <div class="place-find">
+        <label class="field search-field">
+          <span class="visually-hidden">Find a place by name or identifier</span>
+          <input type="search" id="place-search" autocomplete="off"
+                 placeholder="Find a county, borough or tract…"
+                 role="combobox" aria-expanded="false" aria-autocomplete="list"
+                 aria-controls="place-results">
+        </label>
+        <ul id="place-results" class="place-results" role="listbox"
+            aria-label="Matching places" hidden></ul>
+      </div>
+    </div>
+
+    <section id="starters" class="starters" aria-labelledby="starters-title" hidden>
+      <div class="starters-head">
+        <h2 id="starters-title">Three ways to start</h2>
+        <button type="button" class="btn ghost" id="starters-dismiss">Dismiss</button>
+      </div>
+      <p class="muted tiny" id="starters-intro"></p>
+      <ul id="starters-list" class="starters-list"></ul>
+      <p class="muted tiny" id="starters-outro"></p>
+    </section>
+
+    <div id="scope-bar" class="scope-bar" aria-live="polite" tabindex="-1"></div>
+
+    <section id="export-result" class="export-result" aria-live="polite" hidden>
+      <div class="export-head">
+        <h2 id="export-title">Export</h2>
+        <button type="button" class="btn ghost" id="export-dismiss">Dismiss</button>
+      </div>
+      <p class="muted tiny" id="export-what"></p>
+      <ul id="export-files" class="export-files"></ul>
+      <p class="muted tiny" id="export-where"></p>
+    </section>
+
+    <div id="blocked" class="blocked" hidden></div>
+
+    <figure class="map-figure">
+      <div class="map-frame">
+        <div id="map" class="map" tabindex="0" role="application"
+             aria-label="Map of the selected measure. Arrow keys pan, plus and minus zoom, 0 fits. The table below lists every value."></div>
+        <div class="map-tools" role="group" aria-label="Map view">
+          <button type="button" class="tool" id="zoom-in" aria-label="Zoom in">+</button>
+          <button type="button" class="tool" id="zoom-out" aria-label="Zoom out">−</button>
+          <button type="button" class="tool wide" id="zoom-fit">Fit</button>
+        </div>
+        <div id="readout" class="readout" aria-live="polite"></div>
+        <div id="map-empty" class="map-empty" hidden></div>
+      </div>
+      <div id="legend" class="legend"></div>
+      <figcaption class="muted tiny" id="map-caption"></figcaption>
+      <div id="hosp-toggle-row" class="hosp-toggle-row" hidden>
+        <label class="hosp-toggle"><input type="checkbox" id="hosp-toggle">
+          Show hospital sites (NYSDOH and CMS registries, separate from the census data)</label>
+        <p id="hosp-map-note" class="muted tiny" aria-live="polite"></p>
+      </div>
+    </figure>
+
+    <div class="table-block">
+      <div class="table-head-row">
+        <h2 id="table-title" tabindex="-1">Areas</h2>
+        <p class="muted tiny" id="table-note"></p>
+      </div>
+      <div class="table-scroll">
+        <table id="data-table">
+          <caption class="visually-hidden">
+            Estimates by area with margins of error. Same values as the map;
+            each row selects the same area the map does.
+          </caption>
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+      <a class="skip-inline" id="table-skip-actions" href="#result-actions"
+         data-skip="actions">Skip to result actions: share, brief and export</a>
+      <p id="table-empty" class="empty-state" hidden></p>
+      <nav id="table-pager" class="table-pager" aria-label="Table pages"></nav>
+    </div>
+
+    <section id="hospitals" class="hospitals" aria-labelledby="hosp-title" hidden></section>
+  </section>
+
+  <aside class="inspect" id="inspect" aria-label="Selected place">
+    <div class="inspect-inner">
+      <h2 class="panel-heading">Selected place</h2>
+      <div id="place-card" class="place-card"></div>
+
+      <h2 class="panel-heading">Compare</h2>
+      <div id="compare-panel" class="compare-panel"></div>
+
+      <h2 class="panel-heading">Reference</h2>
+      <label class="field">
+        <span class="visually-hidden">Compare against a reference</span>
+        <select id="benchmark-select"></select>
+      </label>
+      <div id="benchmark-card" class="benchmark-card"></div>
+
+      <details class="codes-panel">
+        <summary>Published table codes</summary>
+        <div id="source-details"></div>
+      </details>
+    </div>
+  </aside>
+</main>
+
+<aside id="drawer" class="drawer" hidden aria-label="Method and sources">
+  <div class="drawer-head">
+    <h2>Method &amp; sources</h2>
+    <button type="button" class="btn ghost" id="drawer-close">Close</button>
+  </div>
+  <div id="drawer-body" class="drawer-body"></div>
+</aside>
+
+<footer class="footer">
+  <p id="footer-provenance" class="muted tiny"></p>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="core.js"></script>
+<script src="publish.js"></script>
+<script src="hospitals.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
