@@ -26,7 +26,7 @@ python -m census_explorer.cli serve --data-dir data/fixture-processed   # fixtur
 ```
 
 - The 6 skips on Windows: 3 symlink tests (platform cannot create symlinks) and 3 live smoke
-  tests (need `CENSUS_EXPLORER_LIVE=1`, one also `CENSUS_API_KEY`). README's "478 tests on Linux" is older.
+  tests (need `CENSUS_EXPLORER_LIVE=1`, one also `CENSUS_API_KEY`).
 - **Run the Node tests through pytest/unittest, not by hand.** `tests/js/*.test.js` are launched by
   `test_ui_core.py`, `test_hospitals.py` and `test_site_build.py`; the round-trip test needs
   `CENSUS_EXPLORER_ROUNDTRIP`, which `test_site_build.py` builds and sets. They skip if `node` is missing.
