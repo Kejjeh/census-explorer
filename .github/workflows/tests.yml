@@ -1,0 +1,46 @@
+# Run the offline test suite on every push to main and every pull request.
+#
+# This is separate from pages.yml, which is manual and retrieves from the
+# Census Bureau. This workflow never touches the network and uses no secrets.
+#
+# Skipped in CI, by the suite itself:
+#   - the 3 live smoke tests: they need CENSUS_EXPLORER_LIVE=1 (network, and one
+#     also CENSUS_API_KEY). Neither is set here, on purpose.
+# The 3 symlink tests that skip on Windows run here, because Linux can make
+# symlinks. The Node tests (tests/js/*.test.js) are launched by the Python
+# suite, which also sets CENSUS_EXPLORER_ROUNDTRIP for the round-trip test, so
+# the suite is run through Python rather than calling node directly.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Offline test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Standard library only: there is no requirements file to install.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Offline test suite (Python and Node)
+        run: python -B -m unittest discover -s tests -t .

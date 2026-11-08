@@ -25,6 +25,7 @@ python -m census_explorer.cli fixtures build          # offline; writes data/fix
 python -m census_explorer.cli serve --data-dir data/fixture-processed   # fixture mode at http://127.0.0.1:8765/
 ```
 
+- CI (`.github/workflows/tests.yml`) runs the unittest command above, with Node, on every push to `main` and every PR. On Linux only the 3 live smoke tests skip.
 - The 6 skips on Windows: 3 symlink tests (platform cannot create symlinks) and 3 live smoke
   tests (need `CENSUS_EXPLORER_LIVE=1`, one also `CENSUS_API_KEY`).
 - **Run the Node tests through pytest/unittest, not by hand.** `tests/js/*.test.js` are launched by
